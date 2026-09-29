@@ -40,3 +40,7 @@ class MyExtension : EmuExtension {
 ```
 
 `ctx.emu` gives the pass access to the emulator; see `jadx.plugins.emu.api.EmuContext`.
+
+## Sample plugin
+
+- [jadx-emu-string-deobfuscator](https://github.com/nitanmarcel/jadx-emu-string-deobfuscator) - string decryptor
