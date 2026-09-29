@@ -26,8 +26,9 @@ class TryBlock(val start: Int, val end: Int, val handlers: List<Handler>)
  * @property ref method reference (name, argument and return types)
  * @property isStatic whether the method is static (no `this` register)
  * @property registersCount total number of registers in the frame
- * @property paramWords number of register words occupied by parameters, including `this`; parameters start
- *   at register `registersCount - paramWords`
+ * @property paramWords number of register words occupied by parameters, including `this`
+ * @property argsStartReg first parameter register (`this` for instance methods); dex places parameters in
+ *   the last [paramWords] registers, other inputs may not
  * @property insns instructions in code order
  * @property offsetToIndex map from instruction offset to its index in [insns]
  * @property tries try/catch ranges
@@ -43,4 +44,5 @@ class DexMethod(
     val offsetToIndex: Map<Int, Int>,
     val tries: List<TryBlock>,
     val codeOffset: Int,
+    val argsStartReg: Int = registersCount - paramWords,
 )

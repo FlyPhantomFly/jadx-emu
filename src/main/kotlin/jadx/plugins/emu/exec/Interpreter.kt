@@ -83,7 +83,10 @@ class Interpreter(private val vm: Vm) {
                 val insn = method.insns[pc]
                 hook?.onStep(method, insn, frame, pc)
                 when (val s = exec(method, insn, frame, pc)) {
-                    is Next -> pc = s.pc
+                    is Next -> {
+                        if (insn.resultReg >= 0 && s.pc == pc + 1) applyResultReg(insn, frame)
+                        pc = s.pc
+                    }
                     is Done -> return s.value
                 }
             }
@@ -97,7 +100,7 @@ class Interpreter(private val vm: Vm) {
      * its declared type.
      */
     fun bindParams(frame: Frame, method: DexMethod, args: List<Any?>, receiver: Any?) {
-        var reg = method.registersCount - method.paramWords
+        var reg = method.argsStartReg
         if (!method.isStatic) { frame.set(reg, receiver); reg++ }
         var i = 0
         for (t in method.ref.argTypes) {
@@ -327,6 +330,19 @@ class Interpreter(private val vm: Vm) {
      * [heap], or through the VM's concrete state when it is null.
      */
     fun absStep(method: DexMethod, insn: DalvikInsn, frame: Frame, pc: Int, resolver: CallResolver? = null, heap: AbsHeap? = null): AbsResult {
+        val res = absStepInner(method, insn, frame, pc, resolver, heap)
+        if (insn.resultReg >= 0 && !res.returns) applyResultReg(insn, frame)
+        return res
+    }
+
+    private fun applyResultReg(insn: DalvikInsn, frame: Frame) {
+        val t = frame.resultType ?: return
+        if (t == "V") return
+        if (t == "J" || t == "D") frame.setWide(insn.resultReg, frame.result) else frame.set(insn.resultReg, retype(frame.result, t))
+        frame.result = null; frame.resultType = null
+    }
+
+    private fun absStepInner(method: DexMethod, insn: DalvikInsn, frame: Frame, pc: Int, resolver: CallResolver?, heap: AbsHeap?): AbsResult {
         val r = insn.regs
         return when (insn.opcode) {
             Opcode.RETURN -> AbsResult(EMPTY_INTS, retype(frame.get(r[0]), method.ref.returnType), true)

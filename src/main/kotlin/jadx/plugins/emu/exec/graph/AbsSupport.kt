@@ -15,7 +15,7 @@ import jadx.api.plugins.input.insns.Opcode
  */
 fun entryFrameRegs(method: DexMethod): Array<Any?> {
     val regs = arrayOfNulls<Any?>(method.registersCount)
-    var r = method.registersCount - method.paramWords
+    var r = method.argsStartReg
     if (!method.isStatic) { regs[r] = UnknownVal(method.declClass); r++ }
     for (t in method.ref.argTypes) {
         regs[r] = UnknownVal(t); r += if (t == "J" || t == "D") 2 else 1

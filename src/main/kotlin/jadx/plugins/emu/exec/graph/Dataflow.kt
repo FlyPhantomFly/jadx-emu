@@ -297,7 +297,7 @@ class Dataflow(private val vm: Vm) {
     private fun entry(method: DexMethod, args: List<Any?>?): State {
         val frame = Frame(method.registersCount)
         if (args == null) {
-            var reg = method.registersCount - method.paramWords
+            var reg = method.argsStartReg
             if (!method.isStatic) { frame.set(reg, UnknownVal(method.declClass)); reg++ }
             for (t in method.ref.argTypes) {
                 if (t == "J" || t == "D") { frame.setWide(reg, UnknownVal(t)); reg += 2 } else { frame.set(reg, UnknownVal(t)); reg++ }

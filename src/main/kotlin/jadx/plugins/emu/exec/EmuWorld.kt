@@ -8,23 +8,27 @@ import jadx.plugins.emu.exec.runtime.DvmObject
  * Create one per session and build VMs from it with [worldVm] so that class initialization and
  * static writes persist across calls.
  *
+ * @property ctx optional shared engine context providing the host policy, environment and
+ *   static-initializer snapshots
  * @property statics static field storage, class descriptor → (field key → value)
- * @property android framework stubs and device environment
+ * @property android framework stubs and device environment; defaults to the context's
  * @property hooks method interceptors
- * @property ctx optional shared engine context providing static-initializer snapshots
  */
 class EmuWorld(
-    val statics: HashMap<String, HashMap<String, Any?>> = HashMap(),
-    val android: AndroidStubs = AndroidStubs(),
-    val hooks: HookRegistry = HookRegistry(),
     val ctx: EngineContext? = null,
+    val statics: HashMap<String, HashMap<String, Any?>> = HashMap(),
+    val android: AndroidStubs = ctx?.android ?: AndroidStubs(),
+    val hooks: HookRegistry = HookRegistry(),
 )
 
 /**
  * Build a concrete-execution [Vm] over [src] that reads and writes the state in [world].
  */
 fun worldVm(src: MethodSource, world: EmuWorld, limits: ExecLimits = ExecLimits()): Vm =
-    Vm(src, limits = limits, hooks = world.hooks, ctx = world.ctx, android = world.android, statics = world.statics, androidEnvUnknown = false)
+    Vm(
+        src, host = world.ctx?.host ?: HostBoundary(), limits = limits, hooks = world.hooks, ctx = world.ctx,
+        android = world.android, statics = world.statics, androidEnvUnknown = false,
+    )
 
 /**
  * Emulate `new classDesc(args)`: allocate a [DvmObject] and run the matching constructor in [world].

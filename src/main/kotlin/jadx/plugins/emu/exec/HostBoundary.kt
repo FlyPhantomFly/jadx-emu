@@ -4,11 +4,19 @@ package jadx.plugins.emu.exec
  * Policy controlling which JVM classes emulated code may execute directly on the host.
  *
  * Only classes in the allow list are reachable; within them, methods with side effects on the
- * process or nondeterministic results are blocked and evaluate to unknown values.
+ * process are always blocked and, unless [allowNondeterministic] is set, so are methods whose
+ * results vary between runs. Blocked calls evaluate to unknown values.
  *
- * @param allow descriptors of host classes that may be invoked; defaults to [DEFAULT_ALLOW]
+ * @param allow descriptors of host classes that may be invoked; defaults to [DEFAULT_ALLOW].
+ *   An empty set disables host execution entirely
+ * @param blocked additional `Lcls;->name` signatures to deny
+ * @param allowNondeterministic permit [NONDETERMINISTIC] methods (time, random, identity hashes)
  */
-class HostBoundary(private val allow: Set<String> = DEFAULT_ALLOW) {
+class HostBoundary(
+    private val allow: Set<String> = DEFAULT_ALLOW,
+    private val blocked: Set<String> = emptySet(),
+    private val allowNondeterministic: Boolean = false,
+) {
 
     /**
      * Whether methods of [declClass] may run on the host at all.
@@ -20,7 +28,7 @@ class HostBoundary(private val allow: Set<String> = DEFAULT_ALLOW) {
      */
     fun isBlocked(declClass: String, name: String): Boolean {
         val sig = "$declClass->$name"
-        return sig in UNSAFE_METHODS || sig in NONDETERMINISTIC
+        return sig in UNSAFE_METHODS || sig in blocked || (!allowNondeterministic && sig in NONDETERMINISTIC)
     }
 
     companion object {

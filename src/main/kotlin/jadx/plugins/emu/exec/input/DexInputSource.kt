@@ -24,6 +24,7 @@ import jadx.api.plugins.input.data.annotations.EncodedType
 import jadx.api.plugins.input.data.annotations.EncodedValue
 import jadx.api.plugins.input.insns.InsnData
 import jadx.api.plugins.input.insns.InsnIndexType
+import jadx.api.plugins.input.insns.Opcode
 import jadx.api.plugins.input.insns.custom.IArrayPayload
 import jadx.api.plugins.input.insns.custom.ISwitchPayload
 import jadx.api.plugins.input.ICodeLoader
@@ -54,25 +55,27 @@ class DexInputSource private constructor(
     override fun allMethods(): List<DexMethod> = byShortId.values.toList()
 
     companion object {
+        private val LOG = org.slf4j.LoggerFactory.getLogger(DexInputSource::class.java)
         private const val ACC_STATIC = 0x8
         private const val ACC_INTERFACE = 0x200
         private const val ACC_NATIVE = 0x100
         private val DEX_NAME = Regex("""classes\d*\.dex""")
-        private val PAYLOAD_OPS = setOf(
-            jadx.api.plugins.input.insns.Opcode.FILL_ARRAY_DATA,
-            jadx.api.plugins.input.insns.Opcode.PACKED_SWITCH,
-            jadx.api.plugins.input.insns.Opcode.SPARSE_SWITCH,
-        )
+        private val PAYLOAD_OPS = setOf(Opcode.FILL_ARRAY_DATA, Opcode.PACKED_SWITCH, Opcode.SPARSE_SWITCH)
 
         /**
          * Load all code from [input], which may be a `.dex` file or a zip/apk containing `classes*.dex` entries.
          */
-        fun load(input: File): DexInputSource {
-            val (paths, cleanup) = dexPaths(input)
+        fun load(input: File): DexInputSource = load(listOf(input))
+
+        /**
+         * Load and merge code from several inputs; see [load].
+         */
+        fun load(inputs: List<File>): DexInputSource {
+            val all = inputs.map { dexPaths(it) }
             try {
-                return fromLoader(DexInputPlugin().loadFiles(paths), signaturesOnly = false)
+                return fromLoader(DexInputPlugin().loadFiles(all.flatMap { it.first }), signaturesOnly = false)
             } finally {
-                cleanup()
+                all.forEach { it.second() }
             }
         }
 
@@ -82,14 +85,29 @@ class DexInputSource private constructor(
         fun loadFramework(jar: File): DexInputSource =
             fromLoader(JavaInputPlugin.loadClassFiles(listOf(jar.toPath())), signaturesOnly = true)
 
-        private fun fromLoader(loader: ICodeLoader, signaturesOnly: Boolean): DexInputSource {
+        /**
+         * Build a source from class data already loaded by jadx, e.g. `ClassNode.getClsData()` of every class
+         * in a `RootNode`. Avoids parsing the inputs a second time and covers every format jadx can open.
+         *
+         * @param signaturesOnly skip instruction decoding; methods will have empty bodies
+         */
+        fun fromClasses(classes: Iterable<IClassData>, signaturesOnly: Boolean = false): DexInputSource {
             val byShortId = HashMap<Pair<String, String>, DexMethod>()
-            val classes = HashMap<String, ClassInfo>()
+            val classInfos = HashMap<String, ClassInfo>()
             val byClass = HashMap<String, List<DexMethod>>()
             val nativeMethods = HashSet<Pair<String, String>>()
-            loader.visitClasses { cd -> readClass(cd, byShortId, classes, byClass, nativeMethods, signaturesOnly) }
-            loader.close()
-            return DexInputSource(byShortId, classes, byClass, nativeMethods)
+            for (cd in classes) readClass(cd, byShortId, classInfos, byClass, nativeMethods, signaturesOnly)
+            return DexInputSource(byShortId, classInfos, byClass, nativeMethods)
+        }
+
+        private fun fromLoader(loader: ICodeLoader, signaturesOnly: Boolean): DexInputSource {
+            val all = ArrayList<IClassData>()
+            loader.visitClasses { all += it.copy() }
+            try {
+                return fromClasses(all, signaturesOnly)
+            } finally {
+                loader.close()
+            }
         }
 
         private fun readClass(
@@ -120,7 +138,9 @@ class DexInputSource private constructor(
                         methods += m
                         byShortId[type to ref.shortId] = m
                     } else {
-                        val m = decodeMethod(type, md)
+                        val m = runCatching { decodeMethod(type, md) }
+                            .onFailure { LOG.debug("skipping method of {}: {}", type, it.toString()) }
+                            .getOrNull()
                         if (m != null) { methods += m; byShortId[type to m.ref.shortId] = m }
                         else if ((md.accessFlags and ACC_NATIVE) != 0) {
                             val mref = md.methodRef.apply { load() }
@@ -143,10 +163,21 @@ class DexInputSource private constructor(
                 insn.decode()
                 val regsCount = insn.regsCount
                 if (regsCount >= 0) {
+                    var ref = refOf(insn)
+                    var literal = insn.literal
+                    var opcode = insn.opcode
+                    if (opcode == Opcode.NEW_ARRAY && literal > 0 && ref is TypeRef) {
+                        ref = TypeRef("[".repeat(literal.toInt()) + ref.desc)
+                        literal = 0
+                    }
+                    if (opcode == Opcode.INVOKE_SPECIAL && ref is MethodRef) {
+                        opcode = if (ref.name == "<init>" || ref.declClass == classType) Opcode.INVOKE_DIRECT else Opcode.INVOKE_SUPER
+                    }
                     insns += DalvikInsn(
-                        insn.opcode, insn.offset,
+                        opcode, insn.offset,
                         IntArray(regsCount) { insn.getReg(it) },
-                        insn.literal, insn.target, refOf(insn), payloadOf(insn),
+                        literal, insn.target, ref, payloadOf(insn),
+                        resultReg = insn.resultReg,
                     )
                 } else {
                     payloadOf(insn)?.let { payloads[insn.offset] = it }
@@ -162,6 +193,7 @@ class DexInputSource private constructor(
             return DexMethod(
                 classType, ref, isStatic, cr.registersCount, paramWords,
                 insns, offsetToIndex, triesOf(cr), cr.codeOffset,
+                argsStartReg = cr.argsStartReg.takeIf { it >= 0 } ?: (cr.registersCount - paramWords),
             )
         }
 

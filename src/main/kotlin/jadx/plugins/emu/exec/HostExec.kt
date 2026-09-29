@@ -43,7 +43,7 @@ class HostExec(private val policy: HostBoundary, private val stubs: AndroidStubs
      * Instantiate host class [type] using the constructor described by [ref].
      */
     fun construct(type: String, ref: MethodRef, args: List<Any?>): Any? {
-        if (!policy.canHandle(type) || !argsUsable(args)) return UnknownVal(type)
+        if (!policy.canHandle(type) || policy.isBlocked(type, ref.name) || !argsUsable(args)) return UnknownVal(type)
         return runCatching {
             val ctor = hostClass(type).getDeclaredConstructor(*paramClasses(ref.argTypes))
             ctor.isAccessible = true

@@ -7,12 +7,35 @@ import jadx.plugins.emu.exec.runtime.WideHigh
 import java.util.IdentityHashMap
 
 /**
- * Per-application facts shared by many [Vm] instances: cached static-initializer results and the set of
- * fields that are mutated outside initializers.
+ * Per-application configuration and facts shared by many [Vm] instances: the host-code policy, the
+ * Android environment, cached static-initializer results and the set of fields mutated outside initializers.
  *
- * Create one per loaded app and pass it as [Vm.ctx]; it is safe to share across threads.
+ * Create one per loaded app and build VMs from it with [newVm]; it is safe to share across threads.
+ *
+ * @property limits default limits for VMs created by [newVm]
+ * @property host which JVM classes emulated code may execute
+ * @property android framework stubs and device environment
  */
-class EngineContext(private val source: MethodSource, private val limits: ExecLimits = ExecLimits()) {
+class EngineContext(
+    private val source: MethodSource,
+    val limits: ExecLimits = ExecLimits(),
+    val host: HostBoundary = HostBoundary(),
+    val android: AndroidStubs = AndroidStubs(),
+) {
+
+    /**
+     * A VM over this context's source, policy and environment.
+     *
+     * @param androidEnvUnknown when true, `Build.*` fields read as unknown so results do not depend on the
+     *   configured device; the default for analyses
+     */
+    fun newVm(
+        limits: ExecLimits = this.limits,
+        hook: ExecHook? = null,
+        hooks: HookRegistry? = null,
+        statics: HashMap<String, HashMap<String, Any?>> = HashMap(),
+        androidEnvUnknown: Boolean = true,
+    ): Vm = Vm(source, host, limits, hook, null, hooks, this, android, statics, androidEnvUnknown)
 
     companion object {
         /**
@@ -50,7 +73,7 @@ class EngineContext(private val source: MethodSource, private val limits: ExecLi
     }
 
     private fun computeSnapshot(desc: String): HashMap<String, Any?>? {
-        val vm = Vm(source, limits = limits)
+        val vm = Vm(source, host, limits, ctx = null, android = android)
         runCatching { vm.ensureClinit(desc) }
         val allowed = superChain(desc)
         if (vm.initialized().any { it !in allowed }) return null

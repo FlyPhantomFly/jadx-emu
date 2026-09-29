@@ -35,6 +35,8 @@ class ArrayPayload(val size: Int, val elementSize: Int, val data: Any?) : InsnPa
  *   switch and `fill-array-data`; unused for other opcodes
  * @property ref the constant-pool item referenced by this instruction (string, type, field, method, call site), if any
  * @property payload resolved switch/array payload for instructions that have one
+ * @property resultReg register that receives the invoke result directly, without a following `move-result`;
+ *   -1 for dex input, set by jadx's Java bytecode input
  */
 class DalvikInsn(
     val opcode: Opcode,
@@ -44,4 +46,5 @@ class DalvikInsn(
     val target: Int,
     val ref: InsnRef?,
     var payload: InsnPayload?,
+    val resultReg: Int = -1,
 )
