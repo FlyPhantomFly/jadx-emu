@@ -120,7 +120,7 @@ class Vm(
         if (stub !== NotHandled) return stub
         if (!host.canHandle(declClass)) return NotHandled
         return runCatching {
-            Class.forName(declClass.removePrefix("L").removeSuffix(";").replace('/', '.')).getField(name).get(null)
+            hostClass(declClass).getField(name).get(null)
         }.getOrDefault(NotHandled)
     }
 

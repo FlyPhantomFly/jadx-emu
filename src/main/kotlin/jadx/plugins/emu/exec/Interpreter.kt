@@ -681,7 +681,11 @@ class Interpreter(private val vm: Vm) {
     private fun invokeHandle(h: DvmMethodHandle, target: Any?, argArr: Any?): Any? {
         val argList = (argArr as? Array<*>)?.toList() ?: if (argArr == null) emptyList() else return UnknownVal("Ljava/lang/Object;")
         h.dexMethod?.let { return vm.call(it, argList, if (it.isStatic) null else target) }
-        h.hostMethod?.let { m -> return runCatching { m.invoke(target, *argList.toTypedArray()) }.getOrElse { UnknownVal("Ljava/lang/Object;") } }
+        h.hostMethod?.let { m ->
+            val ref = MethodRef(classDesc(m.declaringClass), m.name, m.parameterTypes.map { classDesc(it) }, classDesc(m.returnType))
+            return if (java.lang.reflect.Modifier.isStatic(m.modifiers)) vm.hostExec.invokeStatic(ref, argList)
+            else vm.hostExec.invokeInstance(ref, target, argList)
+        }
         return UnknownVal("Ljava/lang/Object;")
     }
 
