@@ -273,7 +273,7 @@ class Interpreter(private val vm: Vm) {
             Opcode.APUT_SHORT, Opcode.APUT_OBJECT, Opcode.APUT_WIDE -> {
                 val a = frame.get(r[1]); val ix = frame.get(r[2]); val v = frame.get(r[0])
                 if (a != null && !a.unk()) {
-                    if (ix.unk()) frame.replace(a, UnknownVal(valueType(a)))
+                    if (ix.unk() || (v.unk() && a !is Array<*>)) frame.replace(a, UnknownVal(valueType(a)))
                     else runCatching { aput(a, ci(ix), v) }.getOrElse { throw VmAbort("aput") }
                 }
             }
