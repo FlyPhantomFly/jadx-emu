@@ -36,6 +36,7 @@ class JadxEmuPlugin : JadxPlugin {
     private val options = EmuOptions()
     private val allOptions = CompositeOptions(options)
     private var loader: ExtensionLoader? = null
+    private var project: ProjectOptions? = null
     private var session: Pair<JadxPluginContext, TargetRegistry>? = null
 
     override fun getPluginInfo(): JadxPluginInfo =
@@ -50,13 +51,14 @@ class JadxEmuPlugin : JadxPlugin {
         context.registerOptions(allOptions)
         val configDir = context.files().pluginConfigDir
         val extensionsDir = configDir.resolve(EXTENSIONS_DIR)
+        val gui = context.guiContext
+        val project = gui?.let { ProjectOptions(it) }?.takeIf { it.available }
+        this.project = project
         context.registerInputsHashSupplier { inputsHash(context.args, extensionsDir) }
         if (!options.enabled) {
             LOG.info("jadx-emu {} disabled by option", EmuVersion.current)
             return
         }
-        val gui = context.guiContext
-        val project = gui?.let { ProjectOptions(it) }?.takeIf { it.available }
         val targets = TargetRegistry(project, project?.read(EmuOptions.TARGETS_OPT) ?: options.targets)
         val l = ExtensionLoader(context, allOptions, targets, extensionsDir, configDir.resolve(DATA_DIR))
         loader = l
@@ -130,7 +132,11 @@ class JadxEmuPlugin : JadxPlugin {
                 "${p.fileName}:$stamp"
             }
         } else ""
-        return FileUtils.md5Sum("${EmuVersion.current}|${allOptions.valuesHash(args.pluginOptions)}|$jars")
+        val values = HashMap(args.pluginOptions)
+        project?.let { p ->
+            for (key in listOf(EmuOptions.ENABLED_EXTENSIONS_OPT, EmuOptions.TARGETS_OPT)) values[key] = p.read(key) ?: ""
+        }
+        return FileUtils.md5Sum("${EmuVersion.current}|${allOptions.valuesHash(values)}|$jars")
     }
 
     companion object {
