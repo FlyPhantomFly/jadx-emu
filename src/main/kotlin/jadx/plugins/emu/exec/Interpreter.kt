@@ -282,12 +282,18 @@ class Interpreter(private val vm: Vm) {
                 if (a != null && !a.unk() && data != null) fillArray(a, data)
             }
 
-            Opcode.IGET -> { val fr = insn.ref as FieldRef; val o = frame.get(r[1]); fieldSet(frame, r[0], if (o is DvmObject) o.fields[key(fr)] else UnknownVal(fr.type), fr.type) }
+            Opcode.IGET -> {
+                val fr = insn.ref as FieldRef; val o = frame.get(r[1])
+                fieldSet(frame, r[0], if (o is DvmObject) (if (o.fields.containsKey(key(fr))) o.fields[key(fr)] else defaultValue(fr.type)) else UnknownVal(fr.type), fr.type)
+            }
             Opcode.IPUT -> { val fr = insn.ref as FieldRef; val o = frame.get(r[1]); if (o is DvmObject) o.fields[key(fr)] = retype(frame.get(r[0]), fr.type) }
             Opcode.SGET -> {
                 val fr = insn.ref as FieldRef; vm.ensureClinit(fr.declClass)
                 fieldSet(frame, r[0], when {
-                    vm.source.classInfo(fr.declClass) != null -> vm.staticsOf(fr.declClass)[key(fr)] ?: UnknownVal(fr.type)
+                    vm.source.classInfo(fr.declClass) != null -> {
+                        val statics = vm.staticsOf(fr.declClass)
+                        if (statics.containsKey(key(fr))) statics[key(fr)] else defaultValue(fr.type)
+                    }
                     else -> vm.hostStaticField(fr.declClass, fr.name).let { if (it !== NotHandled) it else UnknownVal(fr.type) }
                 }, fr.type)
             }
@@ -830,6 +836,11 @@ class Interpreter(private val vm: Vm) {
     private fun cl(v: Any?): Long = when (v) { is Long -> v; is Int -> v.toLong(); else -> ci(v).toLong() }
     private fun cf(v: Any?): Float = when (v) { is Float -> v; is Double -> v.toFloat(); is Int -> Float.fromBits(v); is Long -> v.toFloat(); else -> ci(v).toFloat() }
     private fun cd(v: Any?): Double = when (v) { is Double -> v; is Float -> v.toDouble(); is Long -> Double.fromBits(v); else -> ci(v).toDouble() }
+
+    private fun defaultValue(type: String): Any? = when (type) {
+        "I", "B", "S", "C" -> 0; "J" -> 0L; "F" -> 0f; "D" -> 0.0; "Z" -> false
+        else -> null
+    }
 
     private fun fieldSet(frame: Frame, dest: Int, raw: Any?, t: String) {
         val v = retype(raw, t)
