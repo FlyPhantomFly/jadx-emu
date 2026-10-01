@@ -118,9 +118,9 @@ class Vm(
         if (androidEnvUnknown && android.env.field(declClass, name) !== NotHandled) return NotHandled
         val stub = android.field(declClass, name)
         if (stub !== NotHandled) return stub
-        if (!host.canHandle(declClass)) return NotHandled
         return runCatching {
-            hostClass(declClass).getField(name).get(null)
+            val f = hostClass(declClass).getField(name)
+            if (!host.canRead(f)) NotHandled else f.get(null)
         }.getOrDefault(NotHandled)
     }
 

@@ -937,11 +937,7 @@ class Interpreter(private val vm: Vm) {
             else -> return UnknownVal(OBJECT)
         }
         h.dexMethod?.let { return vm.call(it, argList, if (it.isStatic) null else target) }
-        h.hostMethod?.let { m ->
-            val ref = MethodRef(classDesc(m.declaringClass), m.name, m.parameterTypes.map { classDesc(it) }, classDesc(m.returnType))
-            return if (java.lang.reflect.Modifier.isStatic(m.modifiers)) vm.hostExec.invokeStatic(ref, argList)
-            else vm.hostExec.invokeInstance(ref, target, argList)
-        }
+        h.hostMethod?.let { m -> return vm.hostExec.invokeResolved(m, target, argList, classDesc(m.returnType)) }
         return UnknownVal(OBJECT)
     }
 
@@ -994,8 +990,10 @@ class Interpreter(private val vm: Vm) {
             val statics = vm.staticsOf(desc)
             return info.fields.filter { it.isStatic && it.ref.type == desc }.map { statics[it.ref.key] }.toTypedArray()
         }
-        if (!vm.host.canHandle(desc)) return UnknownVal("[$desc")
-        return runCatching { hostClass(desc).enumConstants as Array<*> }.getOrElse { UnknownVal("[$desc") }
+        return runCatching {
+            val c = hostClass(desc)
+            if (!vm.host.canHandle(c)) UnknownVal("[$desc") else c.enumConstants as Array<*>
+        }.getOrElse { UnknownVal("[$desc") }
     }
 
     private fun descOfName(name: String): String = when {

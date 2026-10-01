@@ -1,0 +1,12 @@
+# Members whose results are random; denied while "restrict random" is set so emulation is reproducible.
+
+@defaultMessage Random values
+java.lang.Math#random()
+java.lang.StrictMath#random()
+java.util.Random#<init>()
+java.util.SplittableRandom#<init>()
+java.util.concurrent.ThreadLocalRandom
+java.security.SecureRandom
+java.util.UUID#randomUUID()
+java.util.random.**
+java.util.Collections#shuffle(java.util.List)

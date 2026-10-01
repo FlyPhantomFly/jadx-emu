@@ -33,9 +33,9 @@ internal class HostCodeGroup(
         val lists = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             border = BorderFactory.createEmptyBorder(4, 8, 8, 8)
-            add(listEditor("Additional allowed classes, one descriptor per line (advanced)", EmuOptions.HOST_ALLOW_OPT))
+            add(listEditor("Additional denied signatures, one per line, e.g. java.util.Scanner  or  java.lang.String#trim()", EmuOptions.HOST_BLOCK_OPT))
             add(Box.createVerticalStrut(10))
-            add(listEditor("Additional blocked methods, one Lcls;->name per line (advanced)", EmuOptions.HOST_BLOCK_OPT))
+            add(listEditor("Re-allowed signatures, one per line, e.g. java.nio.file.Files#readAllBytes(java.nio.file.Path)", EmuOptions.HOST_ALLOW_OPT))
         }
         return JPanel(BorderLayout()).apply {
             add(top, BorderLayout.NORTH)

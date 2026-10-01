@@ -73,6 +73,8 @@ class JadxEmuPlugin : JadxPlugin {
             installMenu(context, gui, l)
         }
 
+        options.hostBoundary().reallowed().takeIf { it.isNotEmpty() }
+            ?.let { LOG.warn("jadx-emu: host policy re-allows {}", it.joinToString(", ")) }
         l.initAll(DefaultEmuContext(context, options))
         val active = l.extensions.count { it.status == ExtensionStatus.ACTIVE }
         LOG.info("jadx-emu {} loaded: {} extension(s) found in {}, {} active", EmuVersion.current, l.extensions.size, extensionsDir, active)

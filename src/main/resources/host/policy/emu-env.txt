@@ -1,0 +1,17 @@
+# Members exposing the host environment; denied while "restrict env" is set so results do not depend on the
+# analyst's machine.
+
+@defaultMessage Host environment
+java.lang.System#getenv(**)
+java.lang.System#getProperty(**)
+java.lang.System#getProperties()
+java.lang.System#lineSeparator()
+java.lang.System#identityHashCode(java.lang.Object)
+java.lang.System#getLogger(**)
+java.util.Locale#getDefault(**)
+java.util.Locale#setDefault(**)
+java.util.Currency#getInstance(java.util.Locale)
+java.nio.charset.Charset#defaultCharset()
+java.util.Properties#load(**)
+java.util.ResourceBundle
+java.lang.management.**

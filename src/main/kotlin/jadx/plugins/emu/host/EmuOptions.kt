@@ -7,6 +7,8 @@ import jadx.plugins.emu.exec.AndroidEnv
 import jadx.plugins.emu.exec.AndroidStubs
 import jadx.plugins.emu.exec.ExecLimits
 import jadx.plugins.emu.exec.HostBoundary
+import jadx.plugins.emu.exec.policy.SignatureSet
+import org.slf4j.LoggerFactory
 
 internal class EmuOptions : BasePluginOptionsBuilder() {
 
@@ -24,9 +26,11 @@ internal class EmuOptions : BasePluginOptionsBuilder() {
     private var maxDepth = 64
 
     private var hostExecute = true
-    private var hostAllow: Set<String> = emptySet()
-    private var hostBlock: Set<String> = emptySet()
-    private var hostNondeterministic = false
+    private var hostAllow = ""
+    private var hostBlock = ""
+    private var restrictRandom = true
+    private var restrictTime = true
+    private var restrictEnv = true
 
     private var sdk = 33
     private var release = "13"
@@ -41,8 +45,16 @@ internal class EmuOptions : BasePluginOptionsBuilder() {
     val limits: ExecLimits get() = ExecLimits(maxSteps = maxSteps, maxMillis = maxMillis, maxDepth = maxDepth)
 
     fun hostBoundary(): HostBoundary =
-        if (!hostExecute) HostBoundary(allow = emptySet())
-        else HostBoundary(HostBoundary.DEFAULT_ALLOW + hostAllow, hostBlock, hostNondeterministic)
+        if (!hostExecute) HostBoundary.disabled()
+        else HostBoundary(
+            deny = parsePolicy(HOST_BLOCK_OPT, hostBlock), allow = parsePolicy(HOST_ALLOW_OPT, hostAllow),
+            restrictRandom = restrictRandom, restrictTime = restrictTime, restrictEnv = restrictEnv,
+        )
+
+    private fun parsePolicy(opt: String, text: String): SignatureSet =
+        runCatching { HostBoundary.parse(text) }
+            .onFailure { LOG.warn("jadx-emu: ignoring {}: {}", opt, it.message) }
+            .getOrDefault(SignatureSet.EMPTY)
 
     fun androidStubs(): AndroidStubs =
         AndroidStubs(AndroidEnv(sdk, release, model, manufacturer, brand, device, product, fingerprint)).apply {
@@ -64,12 +76,14 @@ internal class EmuOptions : BasePluginOptionsBuilder() {
         intOption(MAX_DEPTH_OPT).description("Maximum call depth").defaultValue(64).setter { maxDepth = it }
 
         boolOption(HOST_EXECUTE_OPT).description("Execute JDK classes").defaultValue(true).setter { hostExecute = it }
-        strOption(HOST_ALLOW_OPT).description("Additional allowed classes (descriptors, one per line) (advanced)").defaultValue("")
-            .setter { hostAllow = splitList(it).toSet() }
-        strOption(HOST_BLOCK_OPT).description("Additional blocked methods (Lcls;->name, one per line) (advanced)").defaultValue("")
-            .setter { hostBlock = splitList(it).toSet() }
-        boolOption(HOST_NONDETERMINISTIC_OPT).description("Allow time, random, and identity APIs").defaultValue(false)
-            .setter { hostNondeterministic = it }
+        boolOption(HOST_RESTRICT_RANDOM_OPT).description("Deny random-number APIs").defaultValue(true).setter { restrictRandom = it }
+        boolOption(HOST_RESTRICT_TIME_OPT).description("Deny current-time and time-zone APIs").defaultValue(true).setter { restrictTime = it }
+        boolOption(HOST_RESTRICT_ENV_OPT).description("Deny host-environment APIs (properties, env, locale)").defaultValue(true)
+            .setter { restrictEnv = it }
+        strOption(HOST_ALLOW_OPT).description("Re-allowed signatures, forbidden-apis syntax, one per line (advanced)").defaultValue("")
+            .setter { hostAllow = splitList(it).joinToString("\n") }
+        strOption(HOST_BLOCK_OPT).description("Additional denied signatures, forbidden-apis syntax, one per line (advanced)").defaultValue("")
+            .setter { hostBlock = splitList(it).joinToString("\n") }
 
         intOption(ANDROID_SDK_OPT).description("SDK version").defaultValue(33).setter { sdk = it }
         strOption(ANDROID_RELEASE_OPT).description("Android version").defaultValue("13").setter { release = it }
@@ -86,7 +100,9 @@ internal class EmuOptions : BasePluginOptionsBuilder() {
     private fun csv(value: String): Set<String> = value.split(',').map(String::trim).filter(String::isNotEmpty).toSet()
 
     companion object {
-        fun splitList(value: String): List<String> = value.split('\n', ',').map(String::trim).filter(String::isNotEmpty)
+        private val LOG = LoggerFactory.getLogger(EmuOptions::class.java)
+
+        fun splitList(value: String): List<String> = value.split('\n').map(String::trim).filter(String::isNotEmpty)
 
         const val ENABLED_OPT = "$PLUGIN_ID.enabled"
         const val STARTUP_DIALOG_OPT = "$PLUGIN_ID.startup-dialog"
@@ -99,7 +115,9 @@ internal class EmuOptions : BasePluginOptionsBuilder() {
         const val HOST_EXECUTE_OPT = "${HOST_PREFIX}execute"
         const val HOST_ALLOW_OPT = "${HOST_PREFIX}allow"
         const val HOST_BLOCK_OPT = "${HOST_PREFIX}block"
-        const val HOST_NONDETERMINISTIC_OPT = "${HOST_PREFIX}nondeterministic"
+        const val HOST_RESTRICT_RANDOM_OPT = "${HOST_PREFIX}restrict-random"
+        const val HOST_RESTRICT_TIME_OPT = "${HOST_PREFIX}restrict-time"
+        const val HOST_RESTRICT_ENV_OPT = "${HOST_PREFIX}restrict-env"
         const val ANDROID_PREFIX = "$PLUGIN_ID.android."
         const val ANDROID_SDK_OPT = "${ANDROID_PREFIX}sdk"
         const val ANDROID_RELEASE_OPT = "${ANDROID_PREFIX}release"
