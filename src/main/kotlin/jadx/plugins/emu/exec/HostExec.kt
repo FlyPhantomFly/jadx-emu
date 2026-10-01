@@ -75,20 +75,19 @@ class HostExec(private val policy: HostBoundary, private val stubs: AndroidStubs
         else -> v
     }
 
-    private fun descClass(desc: String): Class<*> = when (desc) {
-        "I" -> Integer.TYPE; "J" -> java.lang.Long.TYPE; "Z" -> java.lang.Boolean.TYPE
-        "B" -> java.lang.Byte.TYPE; "C" -> Character.TYPE; "S" -> java.lang.Short.TYPE
-        "F" -> java.lang.Float.TYPE; "D" -> java.lang.Double.TYPE; "V" -> Void.TYPE
-        else -> if (desc.startsWith("[")) Class.forName(desc.replace('/', '.'), false, HostExec::class.java.classLoader)
-        else hostClass(desc)
-    }
+    private fun descClass(desc: String): Class<*> = hostClass(desc)
 
 }
 
 /**
- * Load the host class for a type descriptor such as `Ljava/lang/String;` without initializing it.
+ * Load the host class for a type descriptor (`Ljava/lang/String;`, `[I`, `I`) without initializing it.
  *
  * @throws ClassNotFoundException if the class is not on the host classpath
  */
-fun hostClass(desc: String): Class<*> =
-    Class.forName(desc.removePrefix("L").removeSuffix(";").replace('/', '.'), false, HostExec::class.java.classLoader)
+fun hostClass(desc: String): Class<*> = when (desc) {
+    "I" -> Integer.TYPE; "J" -> java.lang.Long.TYPE; "Z" -> java.lang.Boolean.TYPE
+    "B" -> java.lang.Byte.TYPE; "C" -> Character.TYPE; "S" -> java.lang.Short.TYPE
+    "F" -> java.lang.Float.TYPE; "D" -> java.lang.Double.TYPE; "V" -> Void.TYPE
+    else -> if (desc.startsWith("[")) Class.forName(desc.replace('/', '.'), false, HostExec::class.java.classLoader)
+    else Class.forName(desc.removePrefix("L").removeSuffix(";").replace('/', '.'), false, HostExec::class.java.classLoader)
+}

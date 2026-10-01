@@ -4,8 +4,10 @@ import jadx.plugins.emu.exec.model.DexMethod
 
 /**
  * Declared field of a class.
+ *
+ * @property accessFlags `java.lang.reflect.Modifier` bits of the field
  */
-data class FieldMeta(val ref: jadx.plugins.emu.exec.model.FieldRef, val isStatic: Boolean)
+data class FieldMeta(val ref: jadx.plugins.emu.exec.model.FieldRef, val isStatic: Boolean, val accessFlags: Int = 0)
 
 /**
  * Class-level metadata needed by the emulator.
@@ -16,6 +18,7 @@ data class FieldMeta(val ref: jadx.plugins.emu.exec.model.FieldRef, val isStatic
  * @property isInterface whether the class is an interface
  * @property staticInits constant initial values of static fields keyed by [jadx.plugins.emu.exec.model.FieldRef.key]
  * @property fields declared fields
+ * @property accessFlags `java.lang.reflect.Modifier` bits of the class
  */
 data class ClassInfo(
     val type: String,
@@ -24,6 +27,7 @@ data class ClassInfo(
     val isInterface: Boolean,
     val staticInits: Map<String, Any?> = emptyMap(),
     val fields: List<FieldMeta> = emptyList(),
+    val accessFlags: Int = 0,
 )
 
 /**

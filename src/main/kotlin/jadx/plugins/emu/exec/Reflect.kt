@@ -24,6 +24,16 @@ data class DvmClass(val desc: String)
 data class DvmMethodHandle(val dexMethod: DexMethod?, val hostMethod: java.lang.reflect.Method?, val symbol: MethodRef? = null)
 
 /**
- * Emulated `java.lang.reflect.Field` value.
+ * Emulated `java.lang.reflect.Constructor` value.
+ *
+ * @property owner descriptor of the class being constructed
+ * @property params parameter type descriptors as named by the reflective lookup
  */
-data class DvmField(val ref: FieldRef, val isStatic: Boolean)
+data class DvmCtorHandle(val owner: String, val params: List<String>)
+
+/**
+ * Emulated `java.lang.reflect.Field` value.
+ *
+ * @property accessFlags `java.lang.reflect.Modifier` bits, or 0 when unknown
+ */
+data class DvmField(val ref: FieldRef, val isStatic: Boolean, val accessFlags: Int = 0)

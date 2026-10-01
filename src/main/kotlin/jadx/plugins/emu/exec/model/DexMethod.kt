@@ -33,6 +33,7 @@ class TryBlock(val start: Int, val end: Int, val handlers: List<Handler>)
  * @property offsetToIndex map from instruction offset to its index in [insns]
  * @property tries try/catch ranges
  * @property codeOffset offset of the code item in the dex file
+ * @property accessFlags `java.lang.reflect.Modifier` bits of the method
  */
 class DexMethod(
     val declClass: String,
@@ -45,4 +46,5 @@ class DexMethod(
     val tries: List<TryBlock>,
     val codeOffset: Int,
     val argsStartReg: Int = registersCount - paramWords,
+    val accessFlags: Int = 0,
 )

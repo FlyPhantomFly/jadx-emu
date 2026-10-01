@@ -126,7 +126,7 @@ class DexInputSource private constructor(
                 seq<IFieldData> { fd ->
                     fieldConst(type, fd)?.let { (k, v) -> staticInits[k] = v }
                     fields += jadx.plugins.emu.exec.FieldMeta(
-                        jadx.plugins.emu.exec.model.FieldRef(type, fd.name, fd.type), (fd.accessFlags and ACC_STATIC) != 0)
+                        jadx.plugins.emu.exec.model.FieldRef(type, fd.name, fd.type), (fd.accessFlags and ACC_STATIC) != 0, fd.accessFlags)
                 },
                 seq<IMethodData> { md ->
                     if (signaturesOnly) {
@@ -134,7 +134,7 @@ class DexInputSource private constructor(
                         val ref = MethodRef(type, mref.name, mref.argTypes, mref.returnType)
                         val isStatic = (md.accessFlags and ACC_STATIC) != 0
                         val paramWords = (if (isStatic) 0 else 1) + ref.argTypes.sumOf { if (it == "J" || it == "D") 2 else 1 }
-                        val m = DexMethod(type, ref, isStatic, paramWords, paramWords, emptyList(), emptyMap(), emptyList(), 0)
+                        val m = DexMethod(type, ref, isStatic, paramWords, paramWords, emptyList(), emptyMap(), emptyList(), 0, accessFlags = md.accessFlags)
                         methods += m
                         byShortId[type to ref.shortId] = m
                     } else {
@@ -149,7 +149,7 @@ class DexInputSource private constructor(
                     }
                 },
             )
-            classes[type] = ClassInfo(type, cd.superType, cd.interfacesTypes, (cd.accessFlags and ACC_INTERFACE) != 0, staticInits, fields)
+            classes[type] = ClassInfo(type, cd.superType, cd.interfacesTypes, (cd.accessFlags and ACC_INTERFACE) != 0, staticInits, fields, cd.accessFlags)
             byClass[type] = methods
         }
 
@@ -194,6 +194,7 @@ class DexInputSource private constructor(
                 classType, ref, isStatic, cr.registersCount, paramWords,
                 insns, offsetToIndex, triesOf(cr), cr.codeOffset,
                 argsStartReg = cr.argsStartReg.takeIf { it >= 0 } ?: (cr.registersCount - paramWords),
+                accessFlags = md.accessFlags,
             )
         }
 

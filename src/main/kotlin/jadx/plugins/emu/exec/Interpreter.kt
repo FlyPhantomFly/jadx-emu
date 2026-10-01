@@ -31,6 +31,28 @@ class AbsResult(val successors: IntArray, val returnVal: Any?, val returns: Bool
 
 private val EMPTY_INTS = IntArray(0)
 
+private val TYPED_GETTERS = mapOf(
+    "getInt" to "I", "getLong" to "J", "getShort" to "S", "getByte" to "B", "getChar" to "C",
+    "getBoolean" to "Z", "getFloat" to "F", "getDouble" to "D",
+)
+
+private val TYPED_SETTERS = setOf("setInt", "setLong", "setShort", "setByte", "setChar", "setBoolean", "setFloat", "setDouble")
+
+private val PRIMITIVE_NAMES = mapOf(
+    "I" to "int", "J" to "long", "Z" to "boolean", "B" to "byte", "C" to "char", "S" to "short",
+    "F" to "float", "D" to "double", "V" to "void",
+)
+
+private const val ACC_PUBLIC = 0x1
+private const val ACC_VARARGS = 0x80
+
+private const val OBJECT = "Ljava/lang/Object;"
+private const val STRING = "Ljava/lang/String;"
+private const val CLASS = "Ljava/lang/Class;"
+private const val METHOD = "Ljava/lang/reflect/Method;"
+private const val CONSTRUCTOR = "Ljava/lang/reflect/Constructor;"
+private const val FIELD = "Ljava/lang/reflect/Field;"
+
 /**
  * Supplies the result of an invoke during abstract interpretation.
  */
@@ -472,7 +494,8 @@ class Interpreter(private val vm: Vm) {
                 return Next(pc + 1)
             }
         }
-        tryReflect(ref, recv, args)?.let { (res, rt) ->
+        val reflected = try { tryReflect(ref, recv, args) } catch (t: DvmThrowable) { return routeThrow(method, insn.offset, t, frame) }
+        reflected?.let { (res, rt) ->
             frame.result = res; frame.resultType = rt; return Next(pc + 1)
         }
         if (ref.name == "<init>" && recv is UninitHost) {
@@ -564,7 +587,8 @@ class Interpreter(private val vm: Vm) {
         return sb.toString()
     }
 
-    private fun concatable(v: Any?): Boolean = v !is UnknownVal && v !is DvmObject && v !is UninitHost && v !is DvmClass && v !is DvmMethodHandle
+    private fun concatable(v: Any?): Boolean =
+        v !is UnknownVal && v !is DvmObject && v !is UninitHost && v !is DvmClass && v !is DvmMethodHandle && v !is DvmCtorHandle && v !is DvmField
     private fun concatStr(v: Any?): String = if (v == null) "null" else v.toString()
 
     private fun resolveVirtual(startType: String?, shortId: String): DexMethod? {
@@ -577,75 +601,424 @@ class Interpreter(private val vm: Vm) {
     }
 
     /**
-     * Emulate a `java.lang.reflect` or `Class` call on emulated values.
+     * Emulate a `java.lang.Class` or `java.lang.reflect` call on emulated values.
      *
-     * @param allowInvoke whether `Method.invoke` may execute the target
+     * @param allowInvoke whether `Method.invoke`, `Constructor.newInstance` and `Class.newInstance` may execute code
      * @return the result and its type, or null if [ref] is not a handled reflective call
+     * @throws DvmThrowable for failures the Java API reports as exceptions (`Class.cast`, array bounds)
      */
-    fun tryReflect(ref: MethodRef, recv: Any?, args: List<Any?>, allowInvoke: Boolean = true): Pair<Any?, String?>? {
+    fun tryReflect(ref: MethodRef, recv: Any?, args: List<Any?>, allowInvoke: Boolean = true): Pair<Any?, String?>? =
         when (ref.declClass) {
-            "Ljava/lang/Class;" -> when (ref.name) {
-                "forName" -> (args.getOrNull(0) as? String)?.let {
-                    return DvmClass("L" + it.replace('.', '/') + ";") to "Ljava/lang/Class;"
-                }
-                "getDeclaredMethod", "getMethod" -> {
-                    val cls = recv as? DvmClass ?: return null
-                    val name = args.getOrNull(0) as? String ?: return null
-                    val params = (args.getOrNull(1) as? Array<*>)?.map { classDesc(it) } ?: emptyList()
-                    return resolveMethodHandle(cls.desc, name, params) to "Ljava/lang/reflect/Method;"
-                }
-                "getDeclaredField", "getField" -> {
-                    val cls = recv as? DvmClass ?: return null
-                    val name = args.getOrNull(0) as? String ?: return null
-                    return resolveFieldHandle(cls.desc, name) to "Ljava/lang/reflect/Field;"
-                }
-                "getDeclaredFields", "getFields" -> {
-                    val cls = recv as? DvmClass ?: return null
-                    val ci = vm.source.classInfo(cls.desc)
-                    if (ci != null) return ci.fields.map { DvmField(it.ref, it.isStatic) as Any? }.toTypedArray() to "[Ljava/lang/reflect/Field;"
-                    val hf = runCatching {
-                        hostClass(cls.desc).let { if (ref.name == "getFields") it.fields else it.declaredFields }
-                            .map { DvmField(FieldRef(cls.desc, it.name, classDesc(it.type)), java.lang.reflect.Modifier.isStatic(it.modifiers)) as Any? }.toTypedArray()
-                    }.getOrNull() ?: return null
-                    return hf to "[Ljava/lang/reflect/Field;"
-                }
-                "getName", "getCanonicalName" -> (recv as? DvmClass)?.let {
-                    return it.desc.removePrefix("L").removeSuffix(";").replace('/', '.') to "Ljava/lang/String;"
-                }
-                "getSimpleName" -> (recv as? DvmClass)?.let {
-                    return it.desc.removePrefix("L").removeSuffix(";").substringAfterLast('/') to "Ljava/lang/String;"
-                }
+            "Ljava/lang/Class;" -> reflectClass(ref.name, recv, args, allowInvoke)
+            "Ljava/lang/reflect/Method;" -> reflectMethod(ref.name, recv, args, allowInvoke)
+            "Ljava/lang/reflect/Constructor;" -> reflectConstructor(ref.name, recv, args, allowInvoke)
+            "Ljava/lang/reflect/Field;" -> reflectField(ref.name, recv, args)
+            "Ljava/lang/reflect/Array;" -> reflectArray(ref.name, args)
+            "Ljava/lang/Object;" -> when (ref.name) {
+                "getClass" -> valueType(recv)?.let { DvmClass(it) to CLASS }
+                else -> if (isReflective(recv)) identityOp(ref.name, recv, args.map { classOf(it) ?: it }) else null
             }
-            "Ljava/lang/reflect/Method;" -> if (allowInvoke && ref.name == "invoke") {
-                val h = recv as? DvmMethodHandle ?: return null
-                val rt = h.dexMethod?.ref?.returnType ?: h.hostMethod?.let { classDesc(it.returnType) } ?: "Ljava/lang/Object;"
-                return invokeHandle(h, args.getOrNull(0), args.getOrNull(1)) to rt
+            else -> null
+        }
+
+    private fun isReflective(v: Any?) = v is DvmClass || v is DvmMethodHandle || v is DvmCtorHandle || v is DvmField
+
+    private fun identityOp(name: String, recv: Any?, args: List<Any?>): Pair<Any?, String?>? = when (name) {
+        "hashCode" -> recv.hashCode() to "I"
+        "equals" -> (recv == args.getOrNull(0)) to "Z"
+        "toString" -> describe(recv) to STRING
+        else -> null
+    }
+
+    private fun describe(v: Any?): String = when (v) {
+        is DvmClass -> (if (isInterfaceType(v.desc)) "interface " else "class ") + className(v.desc)
+        is DvmMethodHandle -> "${className(methodReturn(v))} ${className(methodOwner(v))}.${methodName(v)}(${methodParams(v).joinToString(",") { className(it) }})"
+        is DvmCtorHandle -> "${className(v.owner)}(${v.params.joinToString(",") { className(it) }})"
+        is DvmField -> "${className(v.ref.type)} ${className(v.ref.declClass)}.${v.ref.name}"
+        else -> v.toString()
+    }
+
+    private fun reflectClass(name: String, recv: Any?, args: List<Any?>, allowInvoke: Boolean): Pair<Any?, String?>? {
+        if (name == "forName") {
+            val desc = descOfName(args.getOrNull(0) as? String ?: return null)
+            val initialize = args.size < 2 || args[1].let { it.unk() || !isZero(it) }
+            if (initialize) vm.ensureClinit(desc)
+            return DvmClass(desc) to CLASS
+        }
+        val cls = classOf(recv) ?: return null
+        val d = cls.desc
+        return when (name) {
+            "getMethod", "getDeclaredMethod" -> {
+                val mname = args.getOrNull(0) as? String ?: return null
+                val params = (args.getOrNull(1) as? Array<*>)?.map { classDesc(it) } ?: emptyList()
+                resolveMethodHandle(d, mname, params, declaredOnly = name == "getDeclaredMethod") to METHOD
             }
-            "Ljava/lang/reflect/Field;" -> {
-                val f = recv as? DvmField ?: return null
-                when (ref.name) {
-                    "getName" -> return f.ref.name to "Ljava/lang/String;"
-                    "getType" -> return DvmClass(f.ref.type) to "Ljava/lang/Class;"
-                    "setAccessible" -> return null to "V"
-                    "get" -> {
-                        if (f.isStatic) { vm.ensureClinit(f.ref.declClass); return (vm.staticsOf(f.ref.declClass)[f.ref.key] ?: UnknownVal(f.ref.type)) to f.ref.type }
-                        val obj = args.getOrNull(0) as? DvmObject ?: return null
-                        return (obj.fields[f.ref.key] ?: UnknownVal(f.ref.type)) to f.ref.type
-                    }
-                    "set" -> {
-                        val v = retype(args.getOrNull(1), f.ref.type)
-                        if (f.isStatic) { vm.ensureClinit(f.ref.declClass); vm.staticsOf(f.ref.declClass)[f.ref.key] = v }
-                        else (args.getOrNull(0) as? DvmObject)?.let { it.fields[f.ref.key] = v }
-                        return null to "V"
-                    }
+            "getMethods", "getDeclaredMethods" -> methodHandles(d, declaredOnly = name == "getDeclaredMethods").toTypedArray<Any?>() to "[$METHOD"
+            "getConstructor", "getDeclaredConstructor" -> {
+                val params = (args.getOrNull(0) as? Array<*>)?.map { classDesc(it) } ?: emptyList()
+                DvmCtorHandle(d, params) to CONSTRUCTOR
+            }
+            "getConstructors", "getDeclaredConstructors" -> ctorHandles(d).toTypedArray<Any?>() to "[$CONSTRUCTOR"
+            "newInstance" -> if (allowInvoke) construct(d, emptyList(), emptyList()) to d else null
+            "getField", "getDeclaredField" -> {
+                val fname = args.getOrNull(0) as? String ?: return null
+                resolveFieldHandle(d, fname, declaredOnly = name == "getDeclaredField") to FIELD
+            }
+            "getFields", "getDeclaredFields" -> fieldHandles(d, declaredOnly = name == "getDeclaredFields").toTypedArray<Any?>() to "[$FIELD"
+            "getName" -> className(d) to STRING
+            "getCanonicalName" -> canonicalName(d) to STRING
+            "getTypeName" -> typeName(d) to STRING
+            "getSimpleName" -> simpleName(d) to STRING
+            "getPackageName" -> packageName(d) to STRING
+            "getSuperclass" -> superclassOf(d)?.let { DvmClass(it) } to CLASS
+            "getInterfaces" -> interfacesOf(d).map { DvmClass(it) as Any? }.toTypedArray() to "[$CLASS"
+            "isInterface" -> isInterfaceType(d) to "Z"
+            "isArray" -> d.startsWith("[") to "Z"
+            "isPrimitive" -> (d.length == 1) to "Z"
+            "isEnum" -> (superclassOf(d) == "Ljava/lang/Enum;") to "Z"
+            "getComponentType" -> (if (d.startsWith("[")) DvmClass(d.substring(1)) else null) to CLASS
+            "getEnumConstants" -> enumConstants(d) to "[$d"
+            "getModifiers" -> classModifiers(d) to "I"
+            "isInstance" -> args.getOrNull(0).let { o ->
+                when {
+                    o.unk() -> UnknownVal("Z")
+                    o == null || o == 0 -> false
+                    else -> valueType(o)?.let { isAssignable(it, d) } ?: UnknownVal("Z")
                 }
-            }
-            "Ljava/lang/Object;" -> if (ref.name == "getClass") {
-                val t = valueType(recv) ?: return null
-                return DvmClass(t) to "Ljava/lang/Class;"
+            } to "Z"
+            "isAssignableFrom" -> classOf(args.getOrNull(0))?.let { isAssignable(it.desc, d) } to "Z"
+            "cast" -> args.getOrNull(0).let { o ->
+                val vt = if (o == null || o == 0 || o.unk()) null else valueType(o)
+                if (vt != null && !isAssignable(vt, d)) throw DvmThrowable("Ljava/lang/ClassCastException;", "${className(vt)} cannot be cast to ${className(d)}")
+                o
+            } to d
+            "desiredAssertionStatus" -> false to "Z"
+            "hashCode", "equals", "toString" -> identityOp(name, cls, args.map { classOf(it) ?: it })
+            else -> null
+        }
+    }
+
+    private fun classOf(v: Any?): DvmClass? = when (v) {
+        is DvmClass -> v
+        is Class<*> -> DvmClass(classDesc(v))
+        else -> null
+    }
+
+    private fun reflectMethod(name: String, recv: Any?, args: List<Any?>, allowInvoke: Boolean): Pair<Any?, String?>? {
+        val h = recv as? DvmMethodHandle ?: return null
+        return when (name) {
+            "invoke" -> if (allowInvoke) invokeHandle(h, args.getOrNull(0), args.getOrNull(1)) to methodReturn(h) else null
+            "setAccessible" -> null to "V"
+            "getName" -> methodName(h) to STRING
+            "getDeclaringClass" -> DvmClass(methodOwner(h)) to CLASS
+            "getReturnType" -> DvmClass(methodReturn(h)) to CLASS
+            "getParameterTypes" -> methodParams(h).map { DvmClass(it) as Any? }.toTypedArray() to "[$CLASS"
+            "getParameterCount" -> methodParams(h).size to "I"
+            "getModifiers" -> methodModifiers(h) to "I"
+            "isVarArgs" -> (methodModifiers(h) and ACC_VARARGS != 0) to "Z"
+            "hashCode", "equals", "toString" -> identityOp(name, h, args)
+            else -> null
+        }
+    }
+
+    private fun reflectConstructor(name: String, recv: Any?, args: List<Any?>, allowInvoke: Boolean): Pair<Any?, String?>? {
+        val h = recv as? DvmCtorHandle ?: return null
+        return when (name) {
+            "newInstance" -> if (allowInvoke) {
+                val argList = when (val a = args.getOrNull(0)) {
+                    is Array<*> -> a.toList()
+                    null, 0 -> emptyList()
+                    else -> return UnknownVal(h.owner) to h.owner
+                }
+                construct(h.owner, h.params, argList) to h.owner
+            } else null
+            "setAccessible" -> null to "V"
+            "getName" -> className(h.owner) to STRING
+            "getDeclaringClass" -> DvmClass(h.owner) to CLASS
+            "getParameterTypes" -> h.params.map { DvmClass(it) as Any? }.toTypedArray() to "[$CLASS"
+            "getParameterCount" -> h.params.size to "I"
+            "getModifiers" -> ctorModifiers(h) to "I"
+            "hashCode", "equals", "toString" -> identityOp(name, h, args)
+            else -> null
+        }
+    }
+
+    private fun reflectField(name: String, recv: Any?, args: List<Any?>): Pair<Any?, String?>? {
+        val f = recv as? DvmField ?: return null
+        return when (name) {
+            "get" -> reflectFieldGet(f, args.getOrNull(0)) to f.ref.type
+            "set" -> reflectFieldSet(f, args.getOrNull(0), args.getOrNull(1)) to "V"
+            "getName" -> f.ref.name to STRING
+            "getType" -> DvmClass(f.ref.type) to CLASS
+            "getDeclaringClass" -> DvmClass(f.ref.declClass) to CLASS
+            "getModifiers" -> fieldModifiers(f) to "I"
+            "setAccessible" -> null to "V"
+            "hashCode", "equals", "toString" -> identityOp(name, f, args)
+            else -> {
+                TYPED_GETTERS[name]?.let { t -> return retype(reflectFieldGet(f, args.getOrNull(0)), t) to t }
+                if (name in TYPED_SETTERS) reflectFieldSet(f, args.getOrNull(0), args.getOrNull(1)) to "V" else null
             }
         }
+    }
+
+    private fun reflectArray(name: String, args: List<Any?>): Pair<Any?, String?>? {
+        when (name) {
+            "newInstance" -> {
+                val elem = classOf(args.getOrNull(0))?.desc ?: return null
+                return when (val n = args.getOrNull(1)) {
+                    is IntArray -> multiArray(elem, n, 0) to "[".repeat(n.size) + elem
+                    else -> (if (n.unk()) UnknownVal("[$elem") else newArrayChecked("[$elem", ci(n))) to "[$elem"
+                }
+            }
+            "getLength" -> {
+                val a = args.getOrNull(0)
+                return (if (a == null || a.unk() || !a.javaClass.isArray) UnknownVal("I") else java.lang.reflect.Array.getLength(a)) to "I"
+            }
+        }
+        val a = args.getOrNull(0) ?: return null
+        val ix = args.getOrNull(1)
+        if (a.unk() || ix.unk()) {
+            val t = TYPED_GETTERS[name] ?: if (name == "get") OBJECT else return null
+            return UnknownVal(t) to t
+        }
+        if (!a.javaClass.isArray) return null
+        val elemType = valueType(a)?.substring(1) ?: OBJECT
+        return when {
+            name == "get" -> arrayGet(a, ci(ix)) to elemType
+            name == "set" -> arraySet(a, ci(ix), args.getOrNull(2)) to "V"
+            name in TYPED_GETTERS -> TYPED_GETTERS.getValue(name).let { t -> retype(arrayGet(a, ci(ix)), t) to t }
+            name in TYPED_SETTERS -> arraySet(a, ci(ix), args.getOrNull(2)) to "V"
+            else -> null
+        }
+    }
+
+    private fun arrayGet(a: Any, ix: Int): Any? {
+        if (ix < 0 || ix >= java.lang.reflect.Array.getLength(a)) throw DvmThrowable("Ljava/lang/ArrayIndexOutOfBoundsException;", "Index $ix out of bounds")
+        return java.lang.reflect.Array.get(a, ix)
+    }
+
+    private fun arraySet(a: Any, ix: Int, v: Any?): Any? {
+        if (ix < 0 || ix >= java.lang.reflect.Array.getLength(a)) throw DvmThrowable("Ljava/lang/ArrayIndexOutOfBoundsException;", "Index $ix out of bounds")
+        if (v.unk() && a !is Array<*>) return null
+        aput(a, ix, v)
         return null
+    }
+
+    private fun multiArray(elem: String, dims: IntArray, at: Int): Any {
+        val desc = "[".repeat(dims.size - at) + elem
+        val a = newArrayChecked(desc, dims[at])
+        if (at + 1 < dims.size) for (i in 0 until dims[at]) (a as Array<Any?>)[i] = multiArray(elem, dims, at + 1)
+        return a
+    }
+
+    private fun newArrayChecked(desc: String, len: Int): Any {
+        if (len < 0) throw DvmThrowable("Ljava/lang/NegativeArraySizeException;", len.toString())
+        return newArray(desc, len)
+    }
+
+    private fun construct(owner: String, params: List<String>, args: List<Any?>): Any? {
+        vm.ensureClinit(owner)
+        if (vm.source.classInfo(owner) == null) return vm.hostExec.construct(owner, MethodRef(owner, "<init>", params, "V"), args)
+        val cands = vm.source.methodsByName(owner, "<init>")
+        val init = cands.firstOrNull { it.ref.argTypes == params } ?: cands.firstOrNull { it.ref.argTypes.size == args.size } ?: return UnknownVal(owner)
+        val obj = DvmObject(owner)
+        vm.call(init, args, obj)
+        return obj
+    }
+
+    private fun reflectFieldGet(f: DvmField, target: Any?): Any? {
+        val fr = f.ref
+        if (f.isStatic) {
+            vm.ensureClinit(fr.declClass)
+            if (vm.source.classInfo(fr.declClass) == null) {
+                return vm.hostStaticField(fr.declClass, fr.name).let { if (it !== NotHandled) it else UnknownVal(fr.type) }
+            }
+            val statics = vm.staticsOf(fr.declClass)
+            return if (statics.containsKey(fr.key)) statics[fr.key] else defaultValue(fr.type)
+        }
+        val obj = target as? DvmObject ?: return UnknownVal(fr.type)
+        return if (obj.fields.containsKey(fr.key)) obj.fields[fr.key] else defaultValue(fr.type)
+    }
+
+    private fun reflectFieldSet(f: DvmField, target: Any?, value: Any?): Any? {
+        val fr = f.ref
+        val v = retype(value, fr.type)
+        if (f.isStatic) {
+            vm.ensureClinit(fr.declClass)
+            if (vm.source.classInfo(fr.declClass) != null) vm.staticsOf(fr.declClass)[fr.key] = v
+        } else {
+            (target as? DvmObject)?.let { it.fields[fr.key] = v }
+        }
+        return null
+    }
+
+    private fun resolveFieldHandle(owner: String, name: String, declaredOnly: Boolean): Any? {
+        var cur: String? = owner
+        while (cur != null) {
+            val info = vm.source.classInfo(cur) ?: break
+            info.fields.firstOrNull { it.ref.name == name }?.let { return DvmField(it.ref, it.isStatic, it.accessFlags) }
+            if (declaredOnly) return DvmField(FieldRef(owner, name, OBJECT), false)
+            cur = info.superType
+        }
+        val hostOwner = cur ?: return DvmField(FieldRef(owner, name, OBJECT), false)
+        val hostF = runCatching { hostClass(hostOwner).let { if (declaredOnly) it.getDeclaredField(name) else it.getField(name) } }.getOrNull()
+        if (hostF != null) return DvmField(FieldRef(hostOwner, name, classDesc(hostF.type)), java.lang.reflect.Modifier.isStatic(hostF.modifiers), hostF.modifiers)
+        return DvmField(FieldRef(owner, name, OBJECT), false)
+    }
+
+    private fun fieldHandles(owner: String, declaredOnly: Boolean): List<Any?> {
+        val out = ArrayList<Any?>()
+        val seen = HashSet<String>()
+        var cur: String? = owner
+        while (cur != null) {
+            val info = vm.source.classInfo(cur) ?: break
+            for (f in info.fields) if ((declaredOnly || f.accessFlags and ACC_PUBLIC != 0) && seen.add(f.ref.name)) out.add(DvmField(f.ref, f.isStatic, f.accessFlags))
+            if (declaredOnly) return out
+            cur = info.superType
+        }
+        val hostOwner = cur ?: return out
+        runCatching { hostClass(hostOwner).let { if (declaredOnly) it.declaredFields else it.fields } }.getOrNull()?.forEach {
+            if (seen.add(it.name)) out.add(DvmField(FieldRef(hostOwner, it.name, classDesc(it.type)), java.lang.reflect.Modifier.isStatic(it.modifiers), it.modifiers))
+        }
+        return out
+    }
+
+    private fun resolveMethodHandle(owner: String, name: String, params: List<String>, declaredOnly: Boolean): Any? {
+        var cur: String? = owner
+        while (cur != null) {
+            val info = vm.source.classInfo(cur) ?: break
+            val cands = vm.source.methodsByName(cur, name)
+            val m = cands.firstOrNull { it.ref.argTypes == params } ?: cands.firstOrNull { it.ref.argTypes.size == params.size }
+            if (m != null) return DvmMethodHandle(m, null)
+            if (declaredOnly) break
+            cur = info.superType
+        }
+        val hostOwner = cur ?: owner
+        val hostM = runCatching {
+            val hc = hostClass(hostOwner)
+            val types = params.map { hostClass(it) }.toTypedArray()
+            if (declaredOnly) hc.getDeclaredMethod(name, *types)
+            else runCatching { hc.getMethod(name, *types) }.getOrElse { hc.getDeclaredMethod(name, *types) }
+        }.getOrNull()
+        if (hostM != null) return DvmMethodHandle(null, hostM)
+        return DvmMethodHandle(null, null, MethodRef(owner, name, params, OBJECT))
+    }
+
+    private fun methodHandles(owner: String, declaredOnly: Boolean): List<Any?> {
+        val out = ArrayList<Any?>()
+        val seen = HashSet<String>()
+        var cur: String? = owner
+        while (cur != null) {
+            val info = vm.source.classInfo(cur) ?: break
+            for (m in vm.source.methodsOf(cur)) {
+                if (m.ref.name == "<init>" || m.ref.name == "<clinit>") continue
+                if ((declaredOnly || m.accessFlags and ACC_PUBLIC != 0) && seen.add(m.ref.shortId)) out.add(DvmMethodHandle(m, null))
+            }
+            if (declaredOnly) return out
+            cur = info.superType
+        }
+        val hostOwner = cur ?: return out
+        runCatching { hostClass(hostOwner).let { if (declaredOnly) it.declaredMethods else it.methods } }.getOrNull()?.forEach { m ->
+            val id = m.name + "(" + m.parameterTypes.joinToString("") { classDesc(it) } + ")" + classDesc(m.returnType)
+            if (seen.add(id)) out.add(DvmMethodHandle(null, m))
+        }
+        return out
+    }
+
+    private fun ctorHandles(owner: String): List<Any?> {
+        if (vm.source.classInfo(owner) != null) return vm.source.methodsByName(owner, "<init>").map { DvmCtorHandle(owner, it.ref.argTypes) }
+        return runCatching { hostClass(owner).declaredConstructors.map { c -> DvmCtorHandle(owner, c.parameterTypes.map { classDesc(it) }) as Any? } }.getOrDefault(emptyList())
+    }
+
+    private fun invokeHandle(h: DvmMethodHandle, target: Any?, argArr: Any?): Any? {
+        val argList = when (argArr) {
+            is Array<*> -> argArr.toList()
+            null, 0 -> emptyList()
+            else -> return UnknownVal(OBJECT)
+        }
+        h.dexMethod?.let { return vm.call(it, argList, if (it.isStatic) null else target) }
+        h.hostMethod?.let { m ->
+            val ref = MethodRef(classDesc(m.declaringClass), m.name, m.parameterTypes.map { classDesc(it) }, classDesc(m.returnType))
+            return if (java.lang.reflect.Modifier.isStatic(m.modifiers)) vm.hostExec.invokeStatic(ref, argList)
+            else vm.hostExec.invokeInstance(ref, target, argList)
+        }
+        return UnknownVal(OBJECT)
+    }
+
+    private fun methodOwner(h: DvmMethodHandle): String = h.dexMethod?.declClass ?: h.hostMethod?.let { classDesc(it.declaringClass) } ?: h.symbol!!.declClass
+    private fun methodName(h: DvmMethodHandle): String = h.dexMethod?.ref?.name ?: h.hostMethod?.name ?: h.symbol!!.name
+    private fun methodParams(h: DvmMethodHandle): List<String> = h.dexMethod?.ref?.argTypes ?: h.hostMethod?.parameterTypes?.map { classDesc(it) } ?: h.symbol!!.argTypes
+    private fun methodReturn(h: DvmMethodHandle): String = h.dexMethod?.ref?.returnType ?: h.hostMethod?.let { classDesc(it.returnType) } ?: h.symbol!!.returnType
+    private fun methodModifiers(h: DvmMethodHandle): Int = h.dexMethod?.accessFlags ?: h.hostMethod?.modifiers ?: 0
+
+    private fun ctorModifiers(h: DvmCtorHandle): Int {
+        if (vm.source.classInfo(h.owner) != null) return vm.source.methodsByName(h.owner, "<init>").firstOrNull { it.ref.argTypes == h.params }?.accessFlags ?: 0
+        return runCatching { hostClass(h.owner).getDeclaredConstructor(*h.params.map { hostClass(it) }.toTypedArray()).modifiers }.getOrDefault(0)
+    }
+
+    private fun fieldModifiers(f: DvmField): Int {
+        if (f.accessFlags != 0) return f.accessFlags
+        return if (f.isStatic) java.lang.reflect.Modifier.STATIC else 0
+    }
+
+    private fun classModifiers(desc: String): Int {
+        vm.source.classInfo(desc)?.let { return it.accessFlags }
+        if (desc.length == 1 || desc.startsWith("[")) return java.lang.reflect.Modifier.PUBLIC or java.lang.reflect.Modifier.FINAL or java.lang.reflect.Modifier.ABSTRACT
+        return runCatching { hostClass(desc).modifiers }.getOrDefault(0)
+    }
+
+    private fun superclassOf(desc: String): String? {
+        if (desc.length == 1) return null
+        if (desc.startsWith("[")) return OBJECT
+        vm.source.classInfo(desc)?.let { return if (it.isInterface) null else it.superType }
+        return runCatching { hostClass(desc).superclass?.let { classDesc(it) } }.getOrNull()
+    }
+
+    private fun interfacesOf(desc: String): List<String> {
+        if (desc.length == 1) return emptyList()
+        if (desc.startsWith("[")) return listOf("Ljava/lang/Cloneable;", "Ljava/io/Serializable;")
+        vm.source.classInfo(desc)?.let { return it.interfaces }
+        return runCatching { hostClass(desc).interfaces.map { classDesc(it) } }.getOrDefault(emptyList())
+    }
+
+    private fun isInterfaceType(desc: String): Boolean {
+        vm.source.classInfo(desc)?.let { return it.isInterface }
+        return runCatching { hostClass(desc).isInterface }.getOrDefault(false)
+    }
+
+    private fun enumConstants(desc: String): Any? {
+        val info = vm.source.classInfo(desc)
+        if (info != null) {
+            if (info.superType != "Ljava/lang/Enum;") return null
+            vm.ensureClinit(desc)
+            val statics = vm.staticsOf(desc)
+            return info.fields.filter { it.isStatic && it.ref.type == desc }.map { statics[it.ref.key] }.toTypedArray()
+        }
+        if (!vm.host.canHandle(desc)) return UnknownVal("[$desc")
+        return runCatching { hostClass(desc).enumConstants as Array<*> }.getOrElse { UnknownVal("[$desc") }
+    }
+
+    private fun descOfName(name: String): String = when {
+        name.startsWith("[") -> name.replace('.', '/')
+        else -> PRIMITIVE_NAMES.entries.firstOrNull { it.value == name }?.key ?: "L" + name.replace('.', '/') + ";"
+    }
+
+    private fun className(desc: String): String = when {
+        desc.startsWith("[") -> desc.replace('/', '.')
+        desc.length == 1 -> PRIMITIVE_NAMES[desc] ?: desc
+        else -> desc.removePrefix("L").removeSuffix(";").replace('/', '.')
+    }
+
+    private fun typeName(desc: String): String = if (desc.startsWith("[")) typeName(desc.substring(1)) + "[]" else className(desc)
+    private fun canonicalName(desc: String): String = typeName(desc).replace('$', '.')
+    private fun simpleName(desc: String): String = when {
+        desc.startsWith("[") -> simpleName(desc.substring(1)) + "[]"
+        desc.length == 1 -> className(desc)
+        else -> desc.removePrefix("L").removeSuffix(";").substringAfterLast('/').substringAfterLast('$')
+    }
+    private fun packageName(desc: String): String = when {
+        desc.startsWith("[") || desc.length == 1 -> "java.lang"
+        else -> className(desc).substringBeforeLast('.', "")
     }
 
     private fun classDesc(c: Any?): String = when (c) {
@@ -658,35 +1031,6 @@ class Interpreter(private val vm: Vm) {
             else -> "L" + c.name.replace('.', '/') + ";"
         }
         else -> "Ljava/lang/Object;"
-    }
-
-    private fun resolveFieldHandle(owner: String, name: String): Any? {
-        vm.source.classInfo(owner)?.fields?.firstOrNull { it.ref.name == name }?.let { return DvmField(it.ref, it.isStatic) }
-        val hostF = runCatching { hostClass(owner).getDeclaredField(name) }.getOrNull()
-        if (hostF != null) return DvmField(FieldRef(owner, name, classDesc(hostF.type)), java.lang.reflect.Modifier.isStatic(hostF.modifiers))
-        return DvmField(FieldRef(owner, name, "Ljava/lang/Object;"), false)
-    }
-
-    private fun resolveMethodHandle(owner: String, name: String, params: List<String>): Any? {
-        if (vm.source.classInfo(owner) != null) {
-            val cands = vm.source.methodsByName(owner, name)
-            val m = cands.firstOrNull { it.ref.argTypes == params } ?: cands.firstOrNull { it.ref.argTypes.size == params.size }
-            if (m != null) return DvmMethodHandle(m, null)
-        }
-        val hostM = runCatching { hostClass(owner).getDeclaredMethod(name, *params.map { hostClass(it) }.toTypedArray()) }.getOrNull()
-        if (hostM != null) return DvmMethodHandle(null, hostM)
-        return DvmMethodHandle(null, null, MethodRef(owner, name, params, "Ljava/lang/Object;"))
-    }
-
-    private fun invokeHandle(h: DvmMethodHandle, target: Any?, argArr: Any?): Any? {
-        val argList = (argArr as? Array<*>)?.toList() ?: if (argArr == null) emptyList() else return UnknownVal("Ljava/lang/Object;")
-        h.dexMethod?.let { return vm.call(it, argList, if (it.isStatic) null else target) }
-        h.hostMethod?.let { m ->
-            val ref = MethodRef(classDesc(m.declaringClass), m.name, m.parameterTypes.map { classDesc(it) }, classDesc(m.returnType))
-            return if (java.lang.reflect.Modifier.isStatic(m.modifiers)) vm.hostExec.invokeStatic(ref, argList)
-            else vm.hostExec.invokeInstance(ref, target, argList)
-        }
-        return UnknownVal("Ljava/lang/Object;")
     }
 
     private fun routeThrow(method: DexMethod, offset: Int, t: DvmThrowable, frame: Frame): Step {
@@ -729,6 +1073,7 @@ class Interpreter(private val vm: Vm) {
         is DvmObject -> o.type
         is DvmClass -> "Ljava/lang/Class;"
         is DvmMethodHandle -> "Ljava/lang/reflect/Method;"
+        is DvmCtorHandle -> "Ljava/lang/reflect/Constructor;"
         is DvmField -> "Ljava/lang/reflect/Field;"
         is String -> "Ljava/lang/String;"
         is BooleanArray -> "[Z"; is ByteArray -> "[B"; is CharArray -> "[C"; is ShortArray -> "[S"
@@ -833,7 +1178,9 @@ class Interpreter(private val vm: Vm) {
     private fun ci2(v: Any?): Int { if (v.unk()) throw VmAbort("unknown branch"); return ci(v) }
     private fun eq(a: Any?, b: Any?): Boolean {
         if (a.unk() || b.unk()) throw VmAbort("unknown branch")
-        return if (isNumeric(a) && isNumeric(b)) ci(a) == ci(b) else a === b
+        if (isNumeric(a) && isNumeric(b)) return ci(a) == ci(b)
+        if (isReflective(a) || isReflective(b) || a is Class<*> || b is Class<*>) return (classOf(a) ?: a) == (classOf(b) ?: b)
+        return a === b
     }
 
     private fun ci(v: Any?): Int = when (v) { is Int -> v; is Boolean -> if (v) 1 else 0; is Char -> v.code; is Byte -> v.toInt(); is Short -> v.toInt(); is Long -> v.toInt(); else -> 0 }

@@ -40,7 +40,7 @@ class HostBoundary(
             "Ljava/lang/CharSequence;", "Ljava/lang/Math;", "Ljava/lang/StrictMath;", "Ljava/lang/System;",
             "Ljava/lang/Integer;", "Ljava/lang/Long;", "Ljava/lang/Character;", "Ljava/lang/Byte;",
             "Ljava/lang/Short;", "Ljava/lang/Boolean;", "Ljava/lang/Double;", "Ljava/lang/Float;", "Ljava/lang/Number;",
-            "Ljava/lang/Class;", "Ljava/lang/Enum;",
+            "Ljava/lang/Class;", "Ljava/lang/Enum;", "Ljava/lang/reflect/Modifier;",
             "Ljava/lang/Thread;", "Ljava/lang/StackTraceElement;", "Ljava/lang/Throwable;",
             "Ljava/lang/Exception;", "Ljava/lang/RuntimeException;",
             "Ljava/math/BigInteger;", "Ljava/math/BigDecimal;", "Ljava/math/MathContext;", "Ljava/math/RoundingMode;",
