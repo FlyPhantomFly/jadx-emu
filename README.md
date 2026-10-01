@@ -44,3 +44,4 @@ class MyExtension : EmuExtension {
 ## Sample plugin
 
 - [jadx-emu-string-deobfuscator](https://github.com/nitanmarcel/jadx-emu-string-deobfuscator) - string decryptor
+- [jadx-emu-dexguard-unpacker](https://github.com/nitanmarcel/jadx-emu-dexguard-unpacker) - on-demand dexguard hidden dex unpacker.
