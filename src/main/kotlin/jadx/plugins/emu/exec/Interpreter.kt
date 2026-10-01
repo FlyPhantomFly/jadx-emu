@@ -691,7 +691,7 @@ class Interpreter(private val vm: Vm) {
                 val vt = if (o == null || o == 0 || o.unk()) null else valueType(o)
                 if (vt != null && !isAssignable(vt, d)) throw DvmThrowable("Ljava/lang/ClassCastException;", "${className(vt)} cannot be cast to ${className(d)}")
                 o
-            } to d
+            } to OBJECT
             "desiredAssertionStatus" -> false to "Z"
             "hashCode", "equals", "toString" -> identityOp(name, cls, args.map { classOf(it) ?: it })
             else -> null
@@ -707,7 +707,7 @@ class Interpreter(private val vm: Vm) {
     private fun reflectMethod(name: String, recv: Any?, args: List<Any?>, allowInvoke: Boolean): Pair<Any?, String?>? {
         val h = recv as? DvmMethodHandle ?: return null
         return when (name) {
-            "invoke" -> if (allowInvoke) invokeHandle(h, args.getOrNull(0), args.getOrNull(1)) to methodReturn(h) else null
+            "invoke" -> if (allowInvoke) invokeHandle(h, args.getOrNull(0), args.getOrNull(1)) to OBJECT else null
             "setAccessible" -> null to "V"
             "getName" -> methodName(h) to STRING
             "getDeclaringClass" -> DvmClass(methodOwner(h)) to CLASS
@@ -746,7 +746,7 @@ class Interpreter(private val vm: Vm) {
     private fun reflectField(name: String, recv: Any?, args: List<Any?>): Pair<Any?, String?>? {
         val f = recv as? DvmField ?: return null
         return when (name) {
-            "get" -> reflectFieldGet(f, args.getOrNull(0)) to f.ref.type
+            "get" -> reflectFieldGet(f, args.getOrNull(0)) to OBJECT
             "set" -> reflectFieldSet(f, args.getOrNull(0), args.getOrNull(1)) to "V"
             "getName" -> f.ref.name to STRING
             "getType" -> DvmClass(f.ref.type) to CLASS
@@ -782,9 +782,8 @@ class Interpreter(private val vm: Vm) {
             return UnknownVal(t) to t
         }
         if (!a.javaClass.isArray) return null
-        val elemType = valueType(a)?.substring(1) ?: OBJECT
         return when {
-            name == "get" -> arrayGet(a, ci(ix)) to elemType
+            name == "get" -> arrayGet(a, ci(ix)) to OBJECT
             name == "set" -> arraySet(a, ci(ix), args.getOrNull(2)) to "V"
             name in TYPED_GETTERS -> TYPED_GETTERS.getValue(name).let { t -> retype(arrayGet(a, ci(ix)), t) to t }
             name in TYPED_SETTERS -> arraySet(a, ci(ix), args.getOrNull(2)) to "V"
