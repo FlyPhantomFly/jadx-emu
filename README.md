@@ -9,7 +9,7 @@ An extension is a jar in `<jadx config>/plugins-data/jadx-emu/extensions/` conta
 
 ```kotlin
 dependencies {
-    compileOnly("io.github.nitanmarcel:jadx-emu:0.1.0-beta.4")
+    compileOnly("io.github.flyphantomfly:jadx-emu:0.1.0-beta.4")
     compileOnly("io.github.skylot:jadx-core:1.5.6")
 }
 ```
@@ -43,5 +43,5 @@ class MyExtension : EmuExtension {
 
 ## Sample plugin
 
-- [jadx-emu-string-deobfuscator](https://github.com/nitanmarcel/jadx-emu-string-deobfuscator) - string decryptor
-- [jadx-emu-dexguard-unpacker](https://github.com/nitanmarcel/jadx-emu-dexguard-unpacker) - on-demand dexguard hidden dex unpacker.
+- [jadx-emu-string-deobfuscator](https://github.com/flyphantomfly/jadx-emu-string-deobfuscator) - string decryptor
+- [jadx-emu-dexguard-unpacker](https://github.com/flyphantomfly/jadx-emu-dexguard-unpacker) - on-demand dexguard hidden dex unpacker.
