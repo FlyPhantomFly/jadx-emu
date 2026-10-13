@@ -103,7 +103,8 @@ class Interpreter(private val vm: Vm) {
             var pc = 0
             var steps = 0
             while (true) {
-                if (steps++ > vm.limits.maxSteps || vm.deadlineExceeded()) throw VmAbort("step limit")
+                if (steps++ > vm.limits.maxSteps) throw VmAbort("step limit")
+                if (vm.deadlineExceeded()) throw VmAbort("time limit")
                 if (pc !in method.insns.indices) throw VmAbort("pc out of range")
                 val insn = method.insns[pc]
                 vm.curOffset = insn.offset
