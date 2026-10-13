@@ -34,6 +34,7 @@ class EngineContext(
      * @param androidEnvUnknown when true, `Build.*` fields read as unknown so results do not depend on the
      *   configured device; the default for analyses
      * @param diagnostics sinks for this VM, by default the context-wide ones
+     * @param nativeBridge services `native` method calls (e.g. a replay table or an emulator backend); null = none
      */
     fun newVm(
         limits: ExecLimits = this.limits,
@@ -42,7 +43,8 @@ class EngineContext(
         statics: HashMap<String, HashMap<String, Any?>> = HashMap(),
         androidEnvUnknown: Boolean = true,
         diagnostics: List<DiagnosticSink> = this.diagnostics,
-    ): Vm = Vm(source, host, limits, hook, null, hooks, this, android, statics, androidEnvUnknown, diagnostics)
+        nativeBridge: NativeBridge? = null,
+    ): Vm = Vm(source, host, limits, hook, nativeBridge, hooks, this, android, statics, androidEnvUnknown, diagnostics)
 
     companion object {
         /**
