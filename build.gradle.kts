@@ -26,6 +26,17 @@ dependencies {
     compileOnly("io.github.skylot:jadx-dex-input:$jadxVersion")
     compileOnly("io.github.skylot:jadx-java-input:$jadxVersion")
     compileOnly("org.slf4j:slf4j-api:2.0.17")
+
+    testImplementation("io.github.skylot:jadx-core:$jadxVersion")
+    testImplementation("io.github.skylot:jadx-dex-input:$jadxVersion")
+    testImplementation("com.android.tools.smali:smali:3.0.9")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.17")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 java {

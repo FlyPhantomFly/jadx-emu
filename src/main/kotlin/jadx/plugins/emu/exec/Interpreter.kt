@@ -170,6 +170,20 @@ class Interpreter(private val vm: Vm) {
             Opcode.REM_INT_LIT -> return divIntLit(method, insn, pc, frame, insn.literal.toInt()) { a, b -> a % b }
             Opcode.DIV_LONG -> return divLong(method, insn, pc, frame) { a, b -> a / b }
             Opcode.REM_LONG -> return divLong(method, insn, pc, frame) { a, b -> a % b }
+            Opcode.AGET, Opcode.AGET_BOOLEAN, Opcode.AGET_BYTE, Opcode.AGET_BYTE_BOOLEAN, Opcode.AGET_CHAR,
+            Opcode.AGET_SHORT, Opcode.AGET_OBJECT, Opcode.AGET_WIDE,
+            Opcode.APUT, Opcode.APUT_BOOLEAN, Opcode.APUT_BYTE, Opcode.APUT_BYTE_BOOLEAN, Opcode.APUT_CHAR,
+            Opcode.APUT_SHORT, Opcode.APUT_OBJECT, Opcode.APUT_WIDE -> {
+                val a = frame.get(insn.regs[1]); val ix = frame.get(insn.regs[2])
+                if (a != null && !a.unk() && !ix.unk() && a.javaClass.isArray) {
+                    val i = ci(ix); val len = java.lang.reflect.Array.getLength(a)
+                    if (i < 0 || i >= len) {
+                        val msg = "Index $i out of bounds for length $len"
+                        return routeThrow(method, insn.offset, DvmThrowable("Ljava/lang/ArrayIndexOutOfBoundsException;", msg), frame)
+                    }
+                }
+                dataTransfer(insn, frame); return Next(pc + 1)
+            }
             Opcode.INVOKE_STATIC, Opcode.INVOKE_STATIC_RANGE -> return invoke(method, insn, frame, pc, hasReceiver = false, virtual = false, superCall = false)
             Opcode.INVOKE_DIRECT, Opcode.INVOKE_DIRECT_RANGE -> return invoke(method, insn, frame, pc, hasReceiver = true, virtual = false, superCall = false)
             Opcode.INVOKE_VIRTUAL, Opcode.INVOKE_VIRTUAL_RANGE, Opcode.INVOKE_INTERFACE, Opcode.INVOKE_INTERFACE_RANGE ->
@@ -510,7 +524,7 @@ class Interpreter(private val vm: Vm) {
             return Next(pc + 1)
         }
         val target = when {
-            superCall -> resolveVirtual(vm.source.classInfo(ref.declClass)?.superType, ref.shortId)
+            superCall -> resolveVirtual(vm.source.classInfo(method.declClass)?.superType, ref.shortId)
             virtual -> resolveVirtual((recv as? DvmObject)?.type ?: ref.declClass, ref.shortId)
             !hasReceiver -> resolveVirtual(ref.declClass, ref.shortId)
             else -> vm.source.method(ref.declClass, ref.shortId)

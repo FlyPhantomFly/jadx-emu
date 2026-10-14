@@ -66,7 +66,10 @@ class HostBoundary(
      */
     fun reallowed(): List<String> = allow.entries()
 
-    private fun inNamespace(cls: Class<*>): Boolean {
+    /**
+     * Whether [cls] is under `java.` or `javax.crypto.`, the only packages host execution may touch.
+     */
+    fun inNamespace(cls: Class<*>): Boolean {
         val n = cls.name
         return n.startsWith("java.") || n.startsWith("javax.crypto.")
     }

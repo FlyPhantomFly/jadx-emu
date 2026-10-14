@@ -1,5 +1,9 @@
 package jadx.plugins.emu.exec
 
+import jadx.api.plugins.input.insns.Opcode
+import jadx.plugins.emu.exec.model.DalvikInsn
+import jadx.plugins.emu.exec.model.DexMethod
+import jadx.plugins.emu.exec.model.FieldRef
 import jadx.plugins.emu.exec.runtime.DvmObject
 import jadx.plugins.emu.exec.runtime.UninitHost
 import jadx.plugins.emu.exec.runtime.UnknownVal
@@ -82,10 +86,18 @@ class EngineContext(
     }
 
     private fun computeSnapshot(desc: String): HashMap<String, Any?>? {
-        val vm = Vm(source, host, limits, ctx = null, android = android, diagnostics = diagnostics)
-        runCatching { vm.ensureClinit(desc) }
         val allowed = superChain(desc)
-        if (vm.initialized().any { it !in allowed }) return null
+        var foreignWrite = false
+        val hook = object : ExecHook {
+            override fun onStep(method: DexMethod, insn: DalvikInsn, frame: Frame, pc: Int) {
+                if (insn.opcode != Opcode.SPUT) return
+                val fr = insn.ref as? FieldRef ?: return
+                if (fr.declClass != method.declClass) foreignWrite = true
+            }
+        }
+        val vm = Vm(source, host, limits, hook = hook, ctx = null, android = android, diagnostics = diagnostics)
+        runCatching { vm.ensureClinit(desc) }
+        if (foreignWrite || vm.initialized().any { it !in allowed }) return null
         val base = vm.statics[desc] ?: return HashMap()
         return try {
             val seen = IdentityHashMap<Any, Any>()

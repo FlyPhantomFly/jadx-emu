@@ -97,8 +97,12 @@ class HostExec(
     }
 
     private fun notFound(ref: MethodRef, type: String): UnknownVal {
-        val reason = if (runCatching { hostClass(ref.declClass) }.isFailure) "class not found" else "method not found on host"
-        return unknown(Kind.HOST_NOT_FOUND, ref, type, reason)
+        val cls = runCatching { hostClass(ref.declClass) }.getOrNull()
+        return when {
+            cls == null -> unknown(Kind.HOST_NOT_FOUND, ref, type, "class not found")
+            !policy.inNamespace(cls) -> unknown(Kind.HOST_OUTSIDE_NAMESPACE, ref, type, HostBoundary.OUTSIDE_NAMESPACE)
+            else -> unknown(Kind.HOST_NOT_FOUND, ref, type, "method not found on host")
+        }
     }
 
     private fun threw(ref: MethodRef, type: String, t: Throwable): UnknownVal {
