@@ -33,6 +33,11 @@ interface EmuExtensionContext {
     val emu: EmuContext
 
     /**
+     * Hooks and stubs registered by this extension.
+     */
+    val hooks: Hooks
+
+    /**
      * Logger named `jadx-emu.<extension id>`.
      */
     val log: Logger

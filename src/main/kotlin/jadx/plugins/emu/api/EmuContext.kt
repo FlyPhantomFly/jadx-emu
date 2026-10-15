@@ -31,7 +31,7 @@ interface EmuContext {
     val source: MethodSource
 
     /**
-     * Mutable state shared between VMs created by [newVm]: static fields, Android stubs and hooks.
+     * Mutable state shared between VMs created by [newVm]: static fields, hooks and stubs.
      */
     val world: EmuWorld
 

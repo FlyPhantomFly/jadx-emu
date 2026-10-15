@@ -14,6 +14,7 @@ class LogSink : DiagnosticSink {
             Diagnostic.Kind.HOST_DENIED -> once(d) { LOG.warn("jadx-emu: {} is denied by host policy; use host.allow, a stub or a hook to run it", callee(d)) }
             Diagnostic.Kind.HOST_OUTSIDE_NAMESPACE, Diagnostic.Kind.HOST_NOT_FOUND, Diagnostic.Kind.MISSING_STUB ->
                 once(d) { LOG.debug("jadx-emu: {} not executed: {}", callee(d), d.detail) }
+            Diagnostic.Kind.HANDLER_FAILED -> once(d) { LOG.warn("jadx-emu: hook or stub for {} failed: {}", callee(d), d.detail) }
             else -> {}
         }
     }

@@ -14,7 +14,7 @@ import java.lang.reflect.Field
  * and is applied last. Denied calls evaluate to unknown values.
  *
  * Framework stubs and hooks run before this policy, so an extension can supply a safe reimplementation of
- * any denied member with [AndroidStubs.registerMethod] or a [HookRegistry] interceptor.
+ * any denied member with [Hooks.stub] or [Hooks.hook].
  *
  * Signatures use the forbidden-apis syntax; see [SignatureSet].
  */

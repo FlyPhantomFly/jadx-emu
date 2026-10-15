@@ -1,6 +1,8 @@
 package jadx.plugins.emu.exec
 
 import jadx.plugins.emu.TestDex
+import jadx.plugins.emu.api.AndroidEnv
+import jadx.plugins.emu.api.Hooks
 import jadx.plugins.emu.TestDex.cls
 import jadx.plugins.emu.TestDex.staticMethod
 import jadx.plugins.emu.exec.model.DalvikInsn
@@ -8,7 +10,6 @@ import jadx.plugins.emu.exec.model.DexMethod
 import jadx.plugins.emu.exec.runtime.UnknownVal
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class HooksStubsTest {
@@ -43,44 +44,69 @@ class HooksStubsTest {
             invoke-virtual {p0}, Ljava/lang/String;->toUpperCase()Ljava/lang/String;
             move-result-object p0
             return-object p0
+        """) + staticMethod("log(Ljava/lang/String;)I", 2, """
+            const-string v0, "tag"
+            invoke-static {v0, p0}, Landroid/util/Log;->d(Ljava/lang/String;Ljava/lang/String;)I
+            move-result v0
+            return v0
         """)))
+
+    private fun radio(hooks: Hooks): Any? = TestDex.call(TestDex.vm(source, hooks = hooks), source, c, "radio()Ljava/lang/String;")
 
     @Test
     fun hookReplacesResultAndSeesArguments() {
-        val hooks = HookRegistry()
+        val hooks = Hooks()
         val seen = ArrayList<List<Any?>>()
-        val id = hooks.add("$c->twice(I)I") { call ->
-            seen.add(call.args.toList())
-            call.replace(100)
+        val reg = hooks.hook("$c->twice(I)I") {
+            seen.add(args.toList())
+            replace(100)
         }
         val vm = TestDex.vm(source, hooks = hooks)
         assertEquals(101, TestDex.call(vm, source, c, "f(I)I", 7))
         assertEquals(listOf(listOf(7)), seen)
-        assertTrue(hooks.remove(id))
+        reg.remove()
         assertEquals(15, TestDex.call(vm, source, c, "f(I)I", 7))
     }
 
     @Test
     fun hookWithoutReplaceLetsOriginalRun() {
-        val hooks = HookRegistry()
+        val hooks = Hooks()
         var calls = 0
-        hooks.add("$c->twice(I)I") { calls++ }
+        hooks.hook("$c->twice(I)I") { calls++ }
         val vm = TestDex.vm(source, hooks = hooks)
         assertEquals(15, TestDex.call(vm, source, c, "f(I)I", 7))
         assertEquals(1, calls)
     }
 
     @Test
+    fun hookCanRewriteArguments() {
+        val hooks = Hooks()
+        hooks.hook("$c->twice") { args[0] = 10 }
+        assertEquals(21, TestDex.call(TestDex.vm(source, hooks = hooks), source, c, "f(I)I", 7))
+    }
+
+    @Test
     fun hookOnHostMethodAndReceiver() {
-        val hooks = HookRegistry()
-        var receiver: Any? = null
-        hooks.add("Ljava/lang/String;->toUpperCase()Ljava/lang/String;") { call ->
-            receiver = call.receiver
-            call.replace("hooked")
+        val hooks = Hooks()
+        var seen: Any? = null
+        hooks.hook("Ljava/lang/String;->toUpperCase()Ljava/lang/String;") {
+            seen = receiver
+            replace("hooked")
         }
         val vm = TestDex.vm(source, hooks = hooks)
         assertEquals("hooked", TestDex.call(vm, source, c, "upper(Ljava/lang/String;)Ljava/lang/String;", "abc"))
-        assertEquals("abc", receiver)
+        assertEquals("abc", seen)
+    }
+
+    @Test
+    fun newestMatchingHandlerRunsFirstAndFirstReplaceWins() {
+        val hooks = Hooks()
+        val order = ArrayList<String>()
+        hooks.hook("$c->twice") { order.add("name"); replace(1) }
+        hooks.hook("$c->twice(I)I") { order.add("exact") }
+        hooks.hook("$c->twice") { order.add("name2"); replace(2) }
+        assertEquals(3, TestDex.call(TestDex.vm(source, hooks = hooks), source, c, "f(I)I", 7))
+        assertEquals(listOf("exact", "name2"), order)
     }
 
     @Test
@@ -97,40 +123,91 @@ class HooksStubsTest {
     }
 
     @Test
-    fun registeredStubAnswersFrameworkMethod() {
-        val stubs = AndroidStubs()
-        stubs.registerMethod("Landroid/os/Build;", "getRadioVersion") { _, _ -> "1.2.3" }
-        val vm = TestDex.vm(source, android = stubs)
-        assertEquals("1.2.3", TestDex.call(vm, source, c, "radio()Ljava/lang/String;"))
-        stubs.clear()
-        assertInstanceOf(UnknownVal::class.java, TestDex.call(TestDex.vm(source, android = stubs), source, c, "radio()Ljava/lang/String;"))
+    fun stubAnswersFrameworkMethod() {
+        val hooks = Hooks()
+        hooks.stub("Landroid/os/Build;->getRadioVersion", "1.2.3")
+        assertEquals("1.2.3", radio(hooks))
+        hooks.clear()
+        assertInstanceOf(UnknownVal::class.java, radio(hooks))
     }
 
     @Test
-    fun stubReturningNotHandledFallsThrough() {
-        val stubs = AndroidStubs()
-        stubs.registerMethod("Landroid/os/Build;", "getRadioVersion") { _, _ -> NotHandled }
-        val vm = TestDex.vm(source, android = stubs)
-        assertInstanceOf(UnknownVal::class.java, TestDex.call(vm, source, c, "radio()Ljava/lang/String;"))
+    fun stubWithoutReplaceFallsThrough() {
+        val hooks = Hooks()
+        hooks.stub("Landroid/os/Build;->getRadioVersion") { }
+        assertInstanceOf(UnknownVal::class.java, radio(hooks))
+    }
+
+    @Test
+    fun userStubOverridesBuiltinAndClearRestoresIt() {
+        val hooks = Hooks()
+        val vm = TestDex.vm(source, hooks = hooks)
+        assertEquals(0, TestDex.call(vm, source, c, "log(Ljava/lang/String;)I", "x"))
+        hooks.stub("Landroid/util/Log;->d") { replace((args[1] as String).length) }
+        assertEquals(3, TestDex.call(vm, source, c, "log(Ljava/lang/String;)I", "abc"))
+        hooks.clear()
+        assertEquals(0, TestDex.call(vm, source, c, "log(Ljava/lang/String;)I", "abc"))
     }
 
     @Test
     fun buildFieldsComeFromEnvOrRegisteredValue() {
-        val env = AndroidEnv(model = "TestPhone")
-        val stubs = AndroidStubs(env)
-        assertEquals("TestPhone", TestDex.call(TestDex.vm(source, android = stubs), source, c, "model()Ljava/lang/String;"))
-        stubs.registerField("Landroid/os/Build;", "MODEL", "Override")
-        assertEquals("Override", TestDex.call(TestDex.vm(source, android = stubs), source, c, "model()Ljava/lang/String;"))
-        val unknownEnv = TestDex.context(source, android = AndroidStubs(env)).newVm(androidEnvUnknown = true)
+        val hooks = Hooks(AndroidEnv(model = "TestPhone"))
+        assertEquals("TestPhone", TestDex.call(TestDex.vm(source, hooks = hooks), source, c, "model()Ljava/lang/String;"))
+        val reg = hooks.field("Landroid/os/Build;->MODEL", "Override")
+        assertEquals("Override", TestDex.call(TestDex.vm(source, hooks = hooks), source, c, "model()Ljava/lang/String;"))
+        reg.remove()
+        assertEquals("TestPhone", TestDex.call(TestDex.vm(source, hooks = hooks), source, c, "model()Ljava/lang/String;"))
+        val unknownEnv = TestDex.context(source, hooks = hooks).newVm(androidEnvUnknown = true)
         assertInstanceOf(UnknownVal::class.java, TestDex.call(unknownEnv, source, c, "model()Ljava/lang/String;"))
     }
 
     @Test
+    fun scopeRegistrationsAreClearedIndependently() {
+        val hooks = Hooks()
+        val a = hooks.scope()
+        val b = hooks.scope()
+        a.stub("Landroid/os/Build;->getRadioVersion", "a")
+        b.stub("Landroid/os/Build;->getRadioVersion", "b")
+        assertEquals("b", radio(hooks))
+        b.clear()
+        assertEquals("a", radio(hooks))
+        hooks.clear()
+        assertInstanceOf(UnknownVal::class.java, radio(hooks))
+        assertEquals(0, TestDex.call(TestDex.vm(source, hooks = hooks), source, c, "log(Ljava/lang/String;)I", "x"))
+    }
+
+    @Test
+    fun failingHandlerIsReportedAndYieldsUnknown() {
+        val hooks = Hooks()
+        hooks.stub("Landroid/os/Build;->getRadioVersion") { error("boom") }
+        hooks.hook("$c->twice") { throw IllegalStateException("bang") }
+        val diags = ArrayList<Diagnostic>()
+        val vm = TestDex.context(source, hooks = hooks).apply { diagnostics.add { diags.add(it) } }.newVm(androidEnvUnknown = false)
+        assertInstanceOf(UnknownVal::class.java, TestDex.call(vm, source, c, "radio()Ljava/lang/String;"))
+        assertInstanceOf(UnknownVal::class.java, TestDex.call(vm, source, c, "f(I)I", 7))
+        assertEquals(
+            listOf("getRadioVersion: java.lang.IllegalStateException: boom", "twice: java.lang.IllegalStateException: bang"),
+            diags.filter { it.kind == Diagnostic.Kind.HANDLER_FAILED }.map { it.ref.name + ": " + it.detail },
+        )
+    }
+
+    @Test
+    fun handlerCanThrowEmulatedException() {
+        val hooks = Hooks()
+        hooks.hook("$c->twice") { throw jadx.plugins.emu.exec.runtime.DvmThrowable("Ljava/lang/IllegalStateException;", "no", null) }
+        val diags = ArrayList<Diagnostic>()
+        val vm = TestDex.context(source, hooks = hooks).apply { diagnostics.add { diags.add(it) } }.newVm(androidEnvUnknown = false)
+        assertInstanceOf(UnknownVal::class.java, vm.invoke(TestDex.method(source, c, "f(I)I"), listOf(7)))
+        assertEquals(listOf(Diagnostic.Kind.UNCAUGHT), diags.map { it.kind })
+    }
+
+    @Test
     fun syntheticCallerShapesStackTrace() {
-        val stubs = AndroidStubs()
-        stubs.syntheticCaller = "com.example.App"
-        val vm = TestDex.vm(source, android = stubs)
+        val vm = TestDex.vm(source)
+        vm.syntheticCaller = "com.example.App"
         assertEquals("com.example.App", TestDex.call(vm, source, c, "caller()Ljava/lang/String;"))
+        val fromEnv = TestDex.vm(source, hooks = Hooks(AndroidEnv(syntheticCaller = "com.example.Env")))
+        assertEquals("com.example.Env", TestDex.call(fromEnv, source, c, "caller()Ljava/lang/String;"))
     }
 
     @Test

@@ -3,8 +3,8 @@ package jadx.plugins.emu.host
 import jadx.api.plugins.options.OptionFlag
 import jadx.api.plugins.options.impl.BasePluginOptionsBuilder
 import jadx.plugins.emu.JadxEmuPlugin.Companion.PLUGIN_ID
-import jadx.plugins.emu.exec.AndroidEnv
-import jadx.plugins.emu.exec.AndroidStubs
+import jadx.plugins.emu.api.AndroidEnv
+import jadx.plugins.emu.api.Hooks
 import jadx.plugins.emu.exec.ExecLimits
 import jadx.plugins.emu.exec.HostBoundary
 import jadx.plugins.emu.exec.policy.SignatureSet
@@ -56,10 +56,7 @@ internal class EmuOptions : BasePluginOptionsBuilder() {
             .onFailure { LOG.warn("jadx-emu: ignoring {}: {}", opt, it.message) }
             .getOrDefault(SignatureSet.EMPTY)
 
-    fun androidStubs(): AndroidStubs =
-        AndroidStubs(AndroidEnv(sdk, release, model, manufacturer, brand, device, product, fingerprint)).apply {
-            syntheticCaller = caller.ifBlank { null }
-        }
+    fun hooks(): Hooks = Hooks(AndroidEnv(sdk, release, model, manufacturer, brand, device, product, fingerprint, caller.ifBlank { null }))
 
     override fun registerOptions() {
         boolOption(ENABLED_OPT).description("Enable jadx-emu").defaultValue(true).setter { enabled = it }

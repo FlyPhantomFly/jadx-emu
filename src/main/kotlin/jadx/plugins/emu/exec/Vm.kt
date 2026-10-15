@@ -1,8 +1,10 @@
 package jadx.plugins.emu.exec
 
+import jadx.plugins.emu.api.Hooks
 import jadx.plugins.emu.exec.model.DexMethod
 import jadx.plugins.emu.exec.model.MethodRef
 import jadx.plugins.emu.exec.runtime.ClinitState
+import jadx.plugins.emu.exec.runtime.DvmObject
 import jadx.plugins.emu.exec.runtime.DvmThrowable
 import jadx.plugins.emu.exec.runtime.UNKNOWN
 import jadx.plugins.emu.exec.runtime.UnknownVal
@@ -31,7 +33,7 @@ interface NativeBridge {
  * Dalvik bytecode emulator.
  *
  * A `Vm` executes methods from [source], running host (JVM) code for classes allowed by [host] and
- * Android framework calls through [android]. Values that cannot be computed become [UnknownVal]s
+ * Android framework calls through the stubs in [hooks]. Values that cannot be computed become [UnknownVal]s
  * rather than errors. Instances are not thread-safe.
  *
  * @property source where classes and method bodies come from
@@ -39,13 +41,13 @@ interface NativeBridge {
  * @property limits step, time and depth limits
  * @property hook optional instruction tracer
  * @property nativeBridge optional handler for `native` methods; without one they yield unknown values
- * @property hooks optional method interceptors
+ * @property hooks method hooks, framework stubs and device environment
  * @property ctx optional shared context supplying cached static-initializer state
- * @property android framework stubs and device environment
  * @property statics static field storage, shared with the caller so state can outlive the VM
- * @property androidEnvUnknown when true, `Build.*` fields from [AndroidEnv] read as unknown so that
+ * @property androidEnvUnknown when true, `Build.*` fields from [jadx.plugins.emu.api.AndroidEnv] read as unknown so that
  *   results do not depend on a particular device; set false for concrete emulation
  * @property diagnostics sinks for calls this VM could not execute
+ * @property syntheticCaller class name reported by `getStackTrace()` frames, or null
  */
 class Vm(
     val source: MethodSource,
@@ -53,17 +55,18 @@ class Vm(
     val limits: ExecLimits = ExecLimits(),
     val hook: ExecHook? = null,
     val nativeBridge: NativeBridge? = null,
-    val hooks: HookRegistry? = null,
+    val hooks: Hooks = Hooks(),
     val ctx: EngineContext? = null,
-    val android: AndroidStubs = AndroidStubs(),
     val statics: HashMap<String, HashMap<String, Any?>> = HashMap(),
     val androidEnvUnknown: Boolean = true,
     val diagnostics: List<DiagnosticSink> = emptyList(),
 ) {
+    var syntheticCaller: String? = hooks.env.syntheticCaller
+
     /**
      * Executor for host-class calls under the [host] policy.
      */
-    val hostExec = HostExec(host, android) { kind, ref, reason -> diagnose(kind, ref, reason) }
+    val hostExec = HostExec(host, this) { kind, ref, reason -> diagnose(kind, ref, reason) }
     internal var curMethod: DexMethod? = null
     internal var curOffset = -1
 
@@ -75,31 +78,44 @@ class Vm(
     private val clinitState = HashMap<String, ClinitState>()
     private val interp = Interpreter(this)
     private var depth = 0
+    private var active = 0
     private var deadline = 0L
+
+    private fun newDeadline(): Long = if (limits.maxMillis <= 0) Long.MAX_VALUE else System.nanoTime() + limits.maxMillis * 1_000_000
+
+    internal fun startDeadline() {
+        if (active == 0) deadline = newDeadline()
+    }
 
     /**
      * Run [method] as a top-level call.
      *
      * Initializes the declaring class first, applies [limits], and never throws: any abort or
-     * uncaught emulated exception yields [UNKNOWN].
+     * uncaught emulated exception yields [UNKNOWN]. Called from a hook, it shares the outer run's time limit.
      *
      * @param args argument values in declaration order (wide values as a single `Long`/`Double`)
      * @param receiver the `this` value for instance methods
      */
     fun invoke(method: DexMethod, args: List<Any?> = emptyList(), receiver: Any? = null): Any? {
-        deadline = if (limits.maxMillis <= 0) Long.MAX_VALUE else System.nanoTime() + limits.maxMillis * 1_000_000
-        runCatching { ensureClinit(method.declClass) }
-        deadline = if (limits.maxMillis <= 0) Long.MAX_VALUE else System.nanoTime() + limits.maxMillis * 1_000_000
-        return try {
-            interp.run(method, args, receiver)
-        } catch (e: VmAbort) {
-            diagnose(Diagnostic.Kind.ABORTED, method.ref, e.message ?: "aborted")
-            UNKNOWN
-        } catch (t: DvmThrowable) {
-            diagnose(Diagnostic.Kind.UNCAUGHT, method.ref, "uncaught ${t.type}")
-            UNKNOWN
-        } catch (t: Throwable) {
-            UNKNOWN
+        val outer = active == 0
+        active++
+        try {
+            if (outer) deadline = newDeadline()
+            runCatching { ensureClinit(method.declClass) }
+            if (outer) deadline = newDeadline()
+            return try {
+                interp.run(method, args, receiver)
+            } catch (e: VmAbort) {
+                diagnose(Diagnostic.Kind.ABORTED, method.ref, e.message ?: "aborted")
+                UNKNOWN
+            } catch (t: DvmThrowable) {
+                diagnose(Diagnostic.Kind.UNCAUGHT, method.ref, "uncaught ${t.type}")
+                UNKNOWN
+            } catch (t: Throwable) {
+                UNKNOWN
+            }
+        } finally {
+            active--
         }
     }
 
@@ -107,14 +123,16 @@ class Vm(
      * Run [method] as a nested call within the current run.
      *
      * Unlike [invoke] this shares the caller's deadline, enforces [ExecLimits.maxDepth], and lets
-     * emulated exceptions propagate to the caller.
+     * emulated exceptions propagate to the caller. Works outside a run too.
      */
     fun call(method: DexMethod, args: List<Any?>, receiver: Any?): Any? {
         if (depth >= limits.maxDepth) {
             diagnose(Diagnostic.Kind.ABORTED, method.ref, "depth limit")
             return UnknownVal(method.ref.returnType)
         }
+        if (active == 0) deadline = newDeadline()
         depth++
+        active++
         try {
             return interp.run(method, args, receiver)
         } catch (e: VmAbort) {
@@ -122,8 +140,20 @@ class Vm(
             return UnknownVal(method.ref.returnType)
         } finally {
             depth--
+            active--
         }
     }
+
+    /**
+     * Call `shortId` on [receiver], resolved on its runtime class.
+     */
+    fun invoke(receiver: Any, shortId: String, args: List<Any?> = emptyList()): Any? {
+        val type = (receiver as? DvmObject)?.type ?: hostDescriptor(receiver.javaClass)
+        if (receiver is DvmObject) interp.resolveVirtualFor(type, shortId)?.let { return call(it, args, receiver) }
+        return hostExec.invokeInstance(MethodRef.of(type, shortId), receiver, args)
+    }
+
+    private fun hostDescriptor(cls: Class<*>): String = "L" + cls.name.replace('.', '/') + ";"
 
     /**
      * Static field storage of [declClass], created on first access. Keys are [jadx.plugins.emu.exec.model.FieldRef.key].
@@ -141,8 +171,8 @@ class Vm(
      * @return the value, or [NotHandled] if the field is stubbed as unknown, blocked by policy, or unreadable
      */
     fun hostStaticField(declClass: String, name: String): Any? {
-        if (androidEnvUnknown && android.env.field(declClass, name) !== NotHandled) return NotHandled
-        val stub = android.field(declClass, name)
+        if (androidEnvUnknown && hooks.env.field(declClass, name) !== NotHandled) return NotHandled
+        val stub = hooks.fieldValue(declClass, name)
         if (stub !== NotHandled) return stub
         return runCatching {
             val f = hostClass(declClass).getField(name)
@@ -157,7 +187,6 @@ class Vm(
      * otherwise from constant field initializers followed by running `<clinit>`. Unknown classes are ignored.
      */
     fun ensureClinit(desc: String) {
-        if (deadline == 0L) deadline = if (limits.maxMillis <= 0) Long.MAX_VALUE else System.nanoTime() + limits.maxMillis * 1_000_000
         if (clinitState[desc] != null) return
         val info = source.classInfo(desc) ?: return
         clinitState[desc] = ClinitState.RUNNING

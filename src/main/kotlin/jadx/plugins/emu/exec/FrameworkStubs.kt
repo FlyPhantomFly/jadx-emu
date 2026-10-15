@@ -2,13 +2,12 @@ package jadx.plugins.emu.exec
 
 import jadx.plugins.emu.exec.input.DexInputSource
 import jadx.plugins.emu.exec.model.DexMethod
-import jadx.plugins.emu.exec.runtime.UnknownVal
 import java.io.File
 
 /**
  * Signatures of the Android framework (API 33), loaded from the bundled stub jar.
  *
- * Provides class hierarchy and method signatures only; behaviour comes from [AndroidStubs].
+ * Provides class hierarchy and method signatures only; behaviour comes from [Hooks] stubs.
  */
 object FrameworkStubs {
 
@@ -26,21 +25,6 @@ object FrameworkStubs {
      * Whether [classDesc] is a framework class.
      */
     fun hasClass(classDesc: String): Boolean = source?.classInfo(classDesc) != null
-
-    /**
-     * Call a framework method through [android]'s handlers.
-     *
-     * @return the handler result, or an [UnknownVal] if the handler is missing or fails
-     * @throws IllegalArgumentException if the method signature does not exist in the framework
-     */
-    fun call(android: AndroidStubs, classDesc: String, shortId: String, receiver: Any?, args: List<Any?>): Any? {
-        val m = method(classDesc, shortId)
-            ?: throw IllegalArgumentException("no framework member $classDesc->$shortId (check the signature)")
-        val r = runCatching {
-            if (m.isStatic) android.callStatic(m.ref, args) else android.callInstance(m.ref, receiver, args)
-        }.getOrElse { UnknownVal(m.ref.returnType) }
-        return if (r === NotHandled) UnknownVal(m.ref.returnType) else r
-    }
 
     private fun loadFromResource(): MethodSource? = runCatching {
         val stream = FrameworkStubs::class.java.getResourceAsStream("/framework/android-13-stub.jar") ?: return null

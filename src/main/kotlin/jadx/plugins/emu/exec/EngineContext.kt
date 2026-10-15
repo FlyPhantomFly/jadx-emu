@@ -1,5 +1,6 @@
 package jadx.plugins.emu.exec
 
+import jadx.plugins.emu.api.Hooks
 import jadx.api.plugins.input.insns.Opcode
 import jadx.plugins.emu.exec.model.DalvikInsn
 import jadx.plugins.emu.exec.model.DexMethod
@@ -19,13 +20,13 @@ import java.util.concurrent.CopyOnWriteArrayList
  *
  * @property limits default limits for VMs created by [newVm]
  * @property host which JVM classes emulated code may execute
- * @property android framework stubs and device environment
+ * @property hooks method hooks, framework stubs and device environment shared by VMs built here
  */
 class EngineContext(
     private val source: MethodSource,
     val limits: ExecLimits = ExecLimits(),
     val host: HostBoundary = HostBoundary(),
-    val android: AndroidStubs = AndroidStubs(),
+    val hooks: Hooks = Hooks(),
 ) {
     /**
      * Sinks receiving [Diagnostic]s from every VM built on this context; [LogSink] is registered by default.
@@ -43,12 +44,12 @@ class EngineContext(
     fun newVm(
         limits: ExecLimits = this.limits,
         hook: ExecHook? = null,
-        hooks: HookRegistry? = null,
+        hooks: Hooks = this.hooks,
         statics: HashMap<String, HashMap<String, Any?>> = HashMap(),
         androidEnvUnknown: Boolean = true,
         diagnostics: List<DiagnosticSink> = this.diagnostics,
         nativeBridge: NativeBridge? = null,
-    ): Vm = Vm(source, host, limits, hook, nativeBridge, hooks, this, android, statics, androidEnvUnknown, diagnostics)
+    ): Vm = Vm(source, host, limits, hook, nativeBridge, hooks, this, statics, androidEnvUnknown, diagnostics)
 
     companion object {
         /**
@@ -95,7 +96,7 @@ class EngineContext(
                 if (fr.declClass != method.declClass) foreignWrite = true
             }
         }
-        val vm = Vm(source, host, limits, hook = hook, ctx = null, android = android, diagnostics = diagnostics)
+        val vm = Vm(source, host, limits, hook = hook, ctx = null, hooks = hooks, diagnostics = diagnostics)
         runCatching { vm.ensureClinit(desc) }
         if (foreignWrite || vm.initialized().any { it !in allowed }) return null
         val base = vm.statics[desc] ?: return HashMap()

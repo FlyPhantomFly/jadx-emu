@@ -26,6 +26,7 @@ class Diagnostic(
         MISSING_STUB,
         ABORTED,
         UNCAUGHT,
+        HANDLER_FAILED,
     }
 
     /**

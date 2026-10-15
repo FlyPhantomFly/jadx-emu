@@ -507,13 +507,10 @@ class Interpreter(private val vm: Vm) {
         val ref = insn.ref as MethodRef
         if (!hasReceiver) vm.ensureClinit(ref.declClass)
         val (recv, args) = gatherArgs(insn, frame, ref, hasReceiver)
-        vm.hooks?.interceptors("${ref.declClass}->${ref.shortId}")?.takeIf { it.isNotEmpty() }?.let { hooks ->
-            val call = HookCall("${ref.declClass}->${ref.shortId}", recv, args)
-            for (h in hooks) h.onInvoke(call)
-            if (call.replaced) {
-                frame.result = retype(call.result, ref.returnType); frame.resultType = ref.returnType
-                return Next(pc + 1)
-            }
+        val hooked = try { vm.hooks.runHooks(vm, ref, recv, args) } catch (t: DvmThrowable) { return routeThrow(method, insn.offset, t, frame) }
+        if (hooked != null && hooked.replaced) {
+            frame.result = retype(hooked.result, ref.returnType); frame.resultType = ref.returnType
+            return Next(pc + 1)
         }
         val reflected = try { tryReflect(ref, recv, args) } catch (t: DvmThrowable) { return routeThrow(method, insn.offset, t, frame) }
         reflected?.let { (res, rt) ->

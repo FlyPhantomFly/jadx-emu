@@ -22,7 +22,7 @@ internal class DefaultEmuContext(
 
     override val source: MethodSource by lazy { load() }
 
-    override val engine: EngineContext by lazy { EngineContext(source, limits, options.hostBoundary(), options.androidStubs()) }
+    override val engine: EngineContext by lazy { EngineContext(source, limits, options.hostBoundary(), options.hooks()) }
 
     override val world: EmuWorld by lazy { EmuWorld(ctx = engine) }
 

@@ -25,6 +25,32 @@ data class MethodRef(
         argTypes.forEach { append(it) }
         append(')'); append(returnType)
     }
+
+    companion object {
+        /**
+         * Parse `shortId` (`name(args)ret`) into a reference on [declClass].
+         */
+        @JvmStatic
+        fun of(declClass: String, shortId: String): MethodRef {
+            val open = shortId.indexOf('(')
+            val close = shortId.indexOf(')', open + 1)
+            require(open > 0 && close > open) { "malformed method id: $shortId" }
+            return MethodRef(declClass, shortId.substring(0, open), splitDescriptors(shortId.substring(open + 1, close)), shortId.substring(close + 1))
+        }
+
+        private fun splitDescriptors(s: String): List<String> {
+            val out = ArrayList<String>()
+            var i = 0
+            while (i < s.length) {
+                val start = i
+                while (s[i] == '[') i++
+                i = if (s[i] == 'L') s.indexOf(';', i) + 1 else i + 1
+                require(i > 0) { "malformed descriptor list: $s" }
+                out.add(s.substring(start, i))
+            }
+            return out
+        }
+    }
 }
 
 /**

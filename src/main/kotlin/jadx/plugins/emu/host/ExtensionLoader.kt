@@ -9,6 +9,7 @@ import jadx.plugins.emu.api.EmuExtensionContext
 import jadx.plugins.emu.api.EmuExtensionInfo
 import jadx.plugins.emu.api.EmuTarget
 import jadx.plugins.emu.api.ExtensionMode
+import jadx.plugins.emu.api.Hooks
 import jadx.plugins.emu.api.TargetStore
 import jadx.plugins.emu.host.gui.PopupSubmenu
 import org.slf4j.Logger
@@ -36,6 +37,8 @@ internal class LoadedExtension(
     var error: Throwable? = null
         internal set
     val passes = ArrayList<JadxPass>()
+    var hooks: Hooks? = null
+        internal set
 }
 
 internal class ExtensionLoader(
@@ -113,7 +116,9 @@ internal class ExtensionLoader(
                     LOG.info("jadx-emu: extension '{}' does not apply to this input, skipping", info.id)
                     continue
                 }
-                loaded.extension.init(ExtensionContextImpl(loaded, emu))
+                val ctx = ExtensionContextImpl(loaded, emu)
+                loaded.hooks = ctx.hooks
+                loaded.extension.init(ctx)
                 LOG.info("jadx-emu: extension '{}' ({}) initialized, {} pass(es)", info.id, info.mode, loaded.passes.size)
             } catch (e: Throwable) {
                 loaded.status = ExtensionStatus.FAILED
@@ -130,6 +135,8 @@ internal class ExtensionLoader(
                 loaded.extension.unload()
             } catch (e: Throwable) {
                 LOG.warn("jadx-emu: extension '{}' failed to unload", loaded.info.id, e)
+            } finally {
+                loaded.hooks?.clear()
             }
         }
     }
@@ -168,6 +175,7 @@ internal class ExtensionLoader(
         override val emu: EmuContext,
     ) : EmuExtensionContext {
         override val jadx: JadxPluginContext get() = host
+        override val hooks: Hooks = emu.world.hooks.scope()
         override val log: Logger = LoggerFactory.getLogger("jadx-emu.${loaded.info.id}")
         override val dataDir: Path by lazy { dataRoot.resolve(loaded.info.id).also { Files.createDirectories(it) } }
 

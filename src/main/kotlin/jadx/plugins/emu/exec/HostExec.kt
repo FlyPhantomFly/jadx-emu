@@ -12,13 +12,13 @@ import java.lang.reflect.Modifier
 /**
  * Runs host (JVM) methods for the emulator via reflection.
  *
- * Every call first consults [stubs]; otherwise the target member is resolved on the host and it proceeds
+ * Every call first consults the VM's stubs; otherwise the target member is resolved on the host and it proceeds
  * only if [policy] allows that member and all arguments are concrete host values. Anything else yields an
  * [UnknownVal].
  */
 class HostExec(
     private val policy: HostBoundary,
-    private val stubs: AndroidStubs = AndroidStubs(),
+    private val vm: Vm,
     private val report: (Kind, MethodRef, String) -> Unit = { _, _, _ -> },
 ) {
 
@@ -26,7 +26,7 @@ class HostExec(
      * Invoke a static method.
      */
     fun invokeStatic(ref: MethodRef, args: List<Any?>): Any? {
-        val sv = stubs.callStatic(ref, args)
+        val sv = vm.hooks.runStubs(vm, ref, null, args)
         if (sv !== NotHandled) return sv
         if (!argsUsable(args)) return unknown(Kind.HOST_UNKNOWN_INPUT, ref, ref.returnType, UNKNOWN_ARGS)
         val m = resolve(ref) ?: return notFound(ref, ref.returnType)
@@ -39,7 +39,7 @@ class HostExec(
      * Invoke an instance method on a host object.
      */
     fun invokeInstance(ref: MethodRef, receiver: Any?, args: List<Any?>): Any? {
-        val sv = stubs.callInstance(ref, receiver, args)
+        val sv = vm.hooks.runStubs(vm, ref, receiver, args)
         if (sv !== NotHandled) return sv
         if (!usable(receiver)) return unknown(Kind.HOST_UNKNOWN_INPUT, ref, ref.returnType, UNKNOWN_RECEIVER)
         if (!argsUsable(args)) return unknown(Kind.HOST_UNKNOWN_INPUT, ref, ref.returnType, UNKNOWN_ARGS)

@@ -56,6 +56,7 @@ class PreciseTrace(private val vm: Vm) {
      */
     fun trace(method: DexMethod): TraceFacts {
         runCatching { vm.ensureClinit(method.declClass) }
+        vm.startDeadline()
         val insns = method.insns
         val handlerEdges = handlerEdgesOf(method)
         val visited = HashSet<String>()

@@ -6,11 +6,10 @@ import com.android.tools.smali.dexlib2.writer.io.FileDataStore
 import com.android.tools.smali.smali.smaliFlexLexer
 import com.android.tools.smali.smali.smaliParser
 import com.android.tools.smali.smali.smaliTreeWalker
-import jadx.plugins.emu.exec.AndroidStubs
 import jadx.plugins.emu.exec.EngineContext
 import jadx.plugins.emu.exec.ExecHook
 import jadx.plugins.emu.exec.ExecLimits
-import jadx.plugins.emu.exec.HookRegistry
+import jadx.plugins.emu.api.Hooks
 import jadx.plugins.emu.exec.HostBoundary
 import jadx.plugins.emu.exec.Vm
 import jadx.plugins.emu.exec.input.DexInputSource
@@ -58,17 +57,16 @@ object TestDex {
         source: DexInputSource,
         limits: ExecLimits = ExecLimits(),
         host: HostBoundary = HostBoundary(),
-        android: AndroidStubs = AndroidStubs(),
-    ): EngineContext = EngineContext(source, limits, host, android)
+        hooks: Hooks = Hooks(),
+    ): EngineContext = EngineContext(source, limits, host, hooks)
 
     fun vm(
         source: DexInputSource,
         limits: ExecLimits = ExecLimits(),
         host: HostBoundary = HostBoundary(),
-        android: AndroidStubs = AndroidStubs(),
+        hooks: Hooks = Hooks(),
         hook: ExecHook? = null,
-        hooks: HookRegistry? = null,
-    ): Vm = context(source, limits, host, android).newVm(limits, hook = hook, hooks = hooks, androidEnvUnknown = false)
+    ): Vm = context(source, limits, host, hooks).newVm(limits, hook = hook, androidEnvUnknown = false)
 
     fun run(source: DexInputSource, cls: String, shortId: String, vararg args: Any?): Any? =
         vm(source).invoke(method(source, cls, shortId), args.toList())
