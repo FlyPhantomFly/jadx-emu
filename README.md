@@ -1,3 +1,5 @@
+> **Fork notice.** This is an independent line of jadx-emu, forked from [nitanmarcel/jadx-emu](https://github.com/nitanmarcel/jadx-emu) (GPLv2). Published as `io.github.flyphantomfly:jadx-emu` from version `0.2.0`. Upstream fixes are cherry-picked. See `NOTICE`.
+
 # jadx-emu
 
 Extensible jadx plugin for dalvik emulation.
@@ -9,7 +11,7 @@ An extension is a jar in `<jadx config>/plugins-data/jadx-emu/extensions/` conta
 
 ```kotlin
 dependencies {
-    compileOnly("io.github.nitanmarcel:jadx-emu:0.1.0-beta.6")
+    compileOnly("io.github.flyphantomfly:jadx-emu:0.2.0")
     compileOnly("io.github.skylot:jadx-core:1.5.6")
 }
 ```

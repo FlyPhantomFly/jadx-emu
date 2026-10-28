@@ -10,8 +10,8 @@ plugins {
     id("com.vanniktech.maven.publish") version "0.33.0"
 }
 
-group = "io.github.nitanmarcel"
-version = "0.1.0-beta.6"
+group = "io.github.flyphantomfly"
+version = "0.2.0"
 
 repositories {
     mavenCentral()

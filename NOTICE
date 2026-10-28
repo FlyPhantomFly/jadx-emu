@@ -1,0 +1,18 @@
+jadx-emu
+========
+
+This project is a fork of jadx-emu (https://github.com/nitanmarcel/jadx-emu),
+which is distributed under the GNU General Public License, version 2 (see LICENSE).
+
+Original work is copyright its respective authors.
+Modifications in this fork are copyright (C) 2026 FlyPhantomFly.
+
+This program is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License, version 2, as published by the Free
+Software Foundation. This program is distributed WITHOUT ANY WARRANTY; without
+even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+See the LICENSE file for the full license text.
+
+Changes from upstream include the Hooks.after return-value hook API and are
+developed as an independent line (version 0.2.0+) under the Maven coordinate
+io.github.flyphantomfly:jadx-emu. Upstream fixes are cherry-picked as applicable.
