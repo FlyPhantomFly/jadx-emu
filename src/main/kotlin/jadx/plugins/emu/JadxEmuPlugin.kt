@@ -43,7 +43,7 @@ class JadxEmuPlugin : JadxPlugin {
         JadxPluginInfoBuilder.pluginId(PLUGIN_ID)
             .name("Jadx Emu")
             .description("Dalvik emulation engine and extension host for jadx")
-            .homepage("https://github.com/nitanmarcel/jadx-emu")
+            .homepage("https://github.com/FlyPhantomFly/jadx-emu")
             .requiredJadxVersion("1.5.6, r2678")
             .build()
 

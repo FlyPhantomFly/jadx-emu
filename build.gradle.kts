@@ -93,7 +93,7 @@ mavenPublishing {
     pom {
         name = "jadx-emu"
         description = "Extensible jadx plugin for dalvik emulation.x"
-        url = "https://github.com/nitanmarcel/jadx-emu"
+        url = "https://github.com/FlyPhantomFly/jadx-emu"
         inceptionYear = "2026"
         licenses {
             license {
@@ -103,15 +103,20 @@ mavenPublishing {
         }
         developers {
             developer {
+                id = "FlyPhantomFly"
+                name = "PhantomThreads"
+                url = "https://github.com/FlyPhantomFly"
+            }
+            developer {
                 id = "nitanmarcel"
                 name = "Marcel Alexandru Nitan"
                 url = "https://github.com/nitanmarcel"
             }
         }
         scm {
-            url = "https://github.com/nitanmarcel/jadx-emu"
-            connection = "scm:git:https://github.com/nitanmarcel/jadx-emu.git"
-            developerConnection = "scm:git:ssh://git@github.com/nitanmarcel/jadx-emu.git"
+            url = "https://github.com/FlyPhantomFly/jadx-emu"
+            connection = "scm:git:https://github.com/FlyPhantomFly/jadx-emu.git"
+            developerConnection = "scm:git:ssh://git@github.com/FlyPhantomFly/jadx-emu.git"
         }
     }
 }
