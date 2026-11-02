@@ -110,6 +110,15 @@ interface EmuExtensionContext {
     }
 
     /**
+     * Makes [backend] available to other extensions under [NativeBackend.id] until this extension unloads.
+     *
+     * An id that is already taken is refused and logged, and the first registration is kept.
+     *
+     * @throws IllegalArgumentException when the id is blank
+     */
+    fun registerNativeBackend(backend: NativeBackend)
+
+    /**
      * Publishes [options] under the prefix `jadx-emu.<extension id>.`.
      *
      * Option names in [options] must not include the prefix. The published options can be set with

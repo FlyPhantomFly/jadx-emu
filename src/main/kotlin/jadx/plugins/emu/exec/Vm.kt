@@ -21,7 +21,7 @@ interface NativeBridge {
     /**
      * Invoke a native method.
      *
-     * @param className descriptor of the declaring class
+     * @param className internal name of the declaring class, as in `com/foo/Bar` (no leading `L`, no `;`)
      * @param signature method signature in `(args)ret` form
      * @param receiver the `this` value, or null for static natives
      * @return the result, or an [UnknownVal] if the call cannot be performed

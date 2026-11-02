@@ -2,6 +2,7 @@ package jadx.plugins.emu.host
 
 import jadx.api.plugins.JadxPluginContext
 import jadx.plugins.emu.api.EmuContext
+import jadx.plugins.emu.api.NativeBackend
 import jadx.plugins.emu.exec.EmuWorld
 import jadx.plugins.emu.exec.EngineContext
 import jadx.plugins.emu.exec.ExecLimits
@@ -16,6 +17,7 @@ import org.slf4j.LoggerFactory
 internal class DefaultEmuContext(
     private val host: JadxPluginContext,
     private val options: EmuOptions,
+    private val nativeBackends: NativeBackendRegistry,
 ) : EmuContext {
 
     override val limits: ExecLimits = options.limits
@@ -25,6 +27,9 @@ internal class DefaultEmuContext(
     override val engine: EngineContext by lazy { EngineContext(source, limits, options.hostBoundary(), options.hooks()) }
 
     override val world: EmuWorld by lazy { EmuWorld(ctx = engine) }
+
+    override fun nativeBackend(id: String): NativeBackend? = nativeBackends.get(id)
+    override val nativeBackendIds: List<String> get() = nativeBackends.ids()
 
     override fun newVm(limits: ExecLimits): Vm = worldVm(source, world, limits)
 

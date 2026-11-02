@@ -8,12 +8,12 @@ You need jadx 1.5.6 and JDK 21.
 
 ```
 ./gradlew shadowJar publishToMavenLocal
-jadx plugins --install-jar "$PWD/build/libs/jadx-emu-0.2.0-plugin.jar"
+jadx plugins --install-jar "$PWD/build/libs/jadx-emu-0.3.0-plugin.jar"
 ```
 
 `shadowJar` builds the plugin jar. `publishToMavenLocal` puts the engine in `~/.m2` so extensions can build against it. Keep exactly one jadx-emu plugin jar installed.
 
-When jadx starts it logs `jadx-emu 0.2.0 loaded: N extension(s) found in ..., N active`. That's the line to check.
+When jadx starts it logs `jadx-emu 0.3.0 loaded: N extension(s) found in ..., N active`. That's the line to check.
 
 ## Using extensions
 
@@ -41,7 +41,7 @@ An extension is a jar in the extensions directory with a class that implements `
 
 ```kotlin
 dependencies {
-    compileOnly("io.github.flyphantomfly:jadx-emu:0.2.0")
+    compileOnly("io.github.flyphantomfly:jadx-emu:0.3.0")
     compileOnly("io.github.skylot:jadx-core:1.5.6")
 }
 ```
@@ -72,6 +72,24 @@ class MyExtension : EmuExtension {
 ```
 
 `ctx.emu` gives the pass access to the emulator. See `jadx.plugins.emu.api.EmuContext`. `Hooks.after(pattern) { result -> ... }` lets a handler see or change what a call actually returned.
+
+## Native backends
+
+Some apps decrypt in native code. A native backend runs those JNI methods for the emulator, for example with unidbg. It's an extension that registers itself:
+
+```kotlin
+ctx.registerNativeBackend(MyBackend())
+```
+
+An extension that needs native code to run looks the backend up when it's about to create a VM, and passes the bridge it gets to `newVm`:
+
+```kotlin
+val backend = ctx.emu.nativeBackend("unidbg")
+val bridge = backend?.open(NativeRequest(apk, setOf("Lcom/foo/Bar;->decrypt"), listOf("libfoo.so")))
+val vm = ctx.emu.engine.newVm(nativeBridge = bridge)
+```
+
+Look it up when you use it, not in `init`. Extensions initialize in the order of their jar names, so the one that provides the backend may not be ready yet. A request has to name both the methods and the libraries. Any native method that isn't named is left alone and behaves exactly as it does with no backend.
 
 ## Credits and license
 

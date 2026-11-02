@@ -74,5 +74,18 @@ interface EmuContext {
     /**
      * Converts a jadx class name to a type descriptor, for example `com.foo.Bar` to `Lcom/foo/Bar;`.
      */
+    /**
+     * The native backend that an extension registered under [id], or `null` when there is none.
+     *
+     * Look it up when you need it, not in [EmuExtension.init]: extensions are initialized in the order of their jar names, so the one that provides the backend may not have run yet.
+     */
+    fun nativeBackend(id: String): NativeBackend? = null
+
+    /**
+     * The ids of the native backends registered so far, in registration order.
+     */
+    val nativeBackendIds: List<String>
+        get() = emptyList()
+
     fun descriptorOf(rawClassName: String): String = "L" + rawClassName.replace('.', '/') + ";"
 }

@@ -13,6 +13,7 @@ import jadx.plugins.emu.host.EmuOptions
 import jadx.plugins.emu.host.EmuVersion
 import jadx.plugins.emu.host.ExtensionLoader
 import jadx.plugins.emu.host.ExtensionStatus
+import jadx.plugins.emu.host.NativeBackendRegistry
 import jadx.plugins.emu.host.gui.EmuSettingsGroup
 import jadx.plugins.emu.host.gui.ProjectOptions
 import jadx.plugins.emu.host.TargetRegistry
@@ -60,7 +61,8 @@ class JadxEmuPlugin : JadxPlugin {
             return
         }
         val targets = TargetRegistry(project, project?.read(EmuOptions.TARGETS_OPT) ?: options.targets)
-        val l = ExtensionLoader(context, allOptions, targets, extensionsDir, configDir.resolve(DATA_DIR))
+        val nativeBackends = NativeBackendRegistry()
+        val l = ExtensionLoader(context, allOptions, targets, extensionsDir, configDir.resolve(DATA_DIR), nativeBackends)
         loader = l
         session = context to targets
         l.discover()
@@ -75,7 +77,7 @@ class JadxEmuPlugin : JadxPlugin {
 
         options.hostBoundary().reallowed().takeIf { it.isNotEmpty() }
             ?.let { LOG.warn("jadx-emu: host policy re-allows {}", it.joinToString(", ")) }
-        l.initAll(DefaultEmuContext(context, options))
+        l.initAll(DefaultEmuContext(context, options, nativeBackends))
         val active = l.extensions.count { it.status == ExtensionStatus.ACTIVE }
         LOG.info("jadx-emu {} loaded: {} extension(s) found in {}, {} active", EmuVersion.current, l.extensions.size, extensionsDir, active)
     }

@@ -8,6 +8,7 @@ import jadx.plugins.emu.api.EmuExtension
 import jadx.plugins.emu.api.EmuExtensionContext
 import jadx.plugins.emu.api.EmuExtensionInfo
 import jadx.plugins.emu.api.EmuTarget
+import jadx.plugins.emu.api.NativeBackend
 import jadx.plugins.emu.api.ExtensionMode
 import jadx.plugins.emu.api.Hooks
 import jadx.plugins.emu.api.TargetStore
@@ -47,6 +48,7 @@ internal class ExtensionLoader(
     private val targets: TargetRegistry,
     private val extensionsDir: Path,
     private val dataRoot: Path,
+    private val nativeBackends: NativeBackendRegistry,
 ) : Closeable {
 
     private val classLoaders = ArrayList<URLClassLoader>()
@@ -123,6 +125,7 @@ internal class ExtensionLoader(
             } catch (e: Throwable) {
                 loaded.status = ExtensionStatus.FAILED
                 loaded.error = e
+                nativeBackends.removeOwner(info.id)
                 LOG.error("jadx-emu: extension '{}' failed to init", info.id, e)
             }
         }
@@ -137,12 +140,14 @@ internal class ExtensionLoader(
                 LOG.warn("jadx-emu: extension '{}' failed to unload", loaded.info.id, e)
             } finally {
                 loaded.hooks?.clear()
+                nativeBackends.removeOwner(loaded.info.id)
             }
         }
     }
 
     override fun close() {
         unloadAll()
+        nativeBackends.clear()
         popupSubmenu.dispose()
         options.clearExtensions()
         _extensions.clear()
@@ -180,6 +185,14 @@ internal class ExtensionLoader(
         override val dataDir: Path by lazy { dataRoot.resolve(loaded.info.id).also { Files.createDirectories(it) } }
 
         override val targets: TargetStore = this@ExtensionLoader.targets.forExtension(loaded.info.id)
+
+        override fun registerNativeBackend(backend: NativeBackend) {
+            if (nativeBackends.register(loaded.info.id, backend)) {
+                log.info("registered native backend '{}'", backend.id)
+            } else {
+                log.warn("native backend '{}' is already registered by another extension, ignoring this one", backend.id)
+            }
+        }
 
         override fun addCodeAction(
             name: String,
