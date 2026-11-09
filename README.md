@@ -8,12 +8,12 @@ You need jadx 1.5.6 and JDK 21.
 
 ```
 ./gradlew shadowJar publishToMavenLocal
-jadx plugins --install-jar "$PWD/build/libs/jadx-emu-0.3.0-plugin.jar"
+jadx plugins --install-jar "$PWD/build/libs/jadx-emu-0.4.0-plugin.jar"
 ```
 
 `shadowJar` builds the plugin jar. `publishToMavenLocal` puts the engine in `~/.m2` so extensions can build against it. Keep exactly one jadx-emu plugin jar installed.
 
-When jadx starts it logs `jadx-emu 0.3.0 loaded: N extension(s) found in ..., N active`. That's the line to check.
+When jadx starts it logs `jadx-emu 0.4.0 loaded: N extension(s) found in ..., N active`. That's the line to check.
 
 ## Using extensions
 
@@ -35,13 +35,27 @@ An extension's own settings use the prefix `jadx-emu.<extension id>.`, for examp
 - [jadx-emu-string-deobfuscator](https://github.com/FlyPhantomFly/jadx-emu-string-deobfuscator) decrypts strings and writes them back into the decompiled code.
 - [jadx-emu-string-sites](https://github.com/FlyPhantomFly/jadx-emu-string-sites) reports which strings an app decrypts and which ones it couldn't recover.
 
+## Running recovered code
+
+If an extension recovers more code at runtime, for example a hidden dex it decrypted, it can load and run it. `emu.loadDex(file)` and `emu.loadDex(bytes)` return a method source. Stack it onto the app with `emu.source + loaded`, which tries the left side first, so a patch layer can replace one method and leave the rest of a class to the layers behind it. `emu.fork(source = ...)` runs it in a child emulator that shares the host policy, device values and diagnostics but keeps its own static fields and hooks, so it doesn't disturb the main state.
+
+```kotlin
+import jadx.plugins.emu.exec.plus
+
+val hidden = emu.source + emu.loadDex(recoveredBytes)
+val child = emu.fork(source = hidden)
+val value = child.newVm().invoke(child.method("com.app.Secret", "key()Ljava/lang/String;")!!)
+```
+
+`Vm` can also build objects and touch fields without running emulated code: `construct`, `getStatic`, `setStatic`, `getField` and `setField`.
+
 ## Writing an extension
 
 An extension is a jar in the extensions directory with a class that implements `jadx.plugins.emu.api.EmuExtension`, listed in `META-INF/services/jadx.plugins.emu.api.EmuExtension`.
 
 ```kotlin
 dependencies {
-    compileOnly("io.github.flyphantomfly:jadx-emu:0.3.0")
+    compileOnly("io.github.flyphantomfly:jadx-emu:0.4.0")
     compileOnly("io.github.skylot:jadx-core:1.5.6")
 }
 ```
@@ -71,7 +85,7 @@ class MyExtension : EmuExtension {
 }
 ```
 
-`ctx.emu` gives the pass access to the emulator. See `jadx.plugins.emu.api.EmuContext`. `Hooks.after(pattern) { result -> ... }` lets a handler see or change what a call actually returned.
+`ctx.emu` gives the pass access to the emulator. See `jadx.plugins.emu.api.EmuContext`. To see or change what a call returned, use `hooks.hookAfter(pattern) { ... result ...; replace(x) }`, or `hooks.after(pattern) { result -> newResult }`. Both run only for calls made from emulated code, not for the method you start a VM with.
 
 ## Native backends
 

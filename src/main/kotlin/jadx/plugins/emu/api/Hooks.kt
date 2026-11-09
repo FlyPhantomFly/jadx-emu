@@ -14,12 +14,12 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * A method call seen by a [MethodHandler].
+ * A method call seen by a [MethodHandler]; in [Hooks.hookAfter] handlers [result] is the value the call returned.
  */
-class MethodCall(val vm: Vm, val method: MethodRef, val receiver: Any?, val args: MutableList<Any?>) {
+class MethodCall(val vm: Vm, val method: MethodRef, val receiver: Any?, val args: MutableList<Any?>, result: Any? = null) {
     var replaced: Boolean = false
         private set
-    var result: Any? = null
+    var result: Any? = result
         private set
 
     /**
@@ -94,6 +94,7 @@ class Hooks private constructor(val env: AndroidEnv, private val parent: Hooks?)
     private val root: Hooks = parent?.root ?: this
     private val counter = AtomicInteger(0)
     private val hooks = ConcurrentHashMap<String, CopyOnWriteArrayList<Entry>>()
+    private val hookAfters = ConcurrentHashMap<String, CopyOnWriteArrayList<Entry>>()
     private val stubs = ConcurrentHashMap<String, CopyOnWriteArrayList<Entry>>()
     private val fields = ConcurrentHashMap<String, CopyOnWriteArrayList<Entry>>()
     private val afters = ConcurrentHashMap<String, CopyOnWriteArrayList<AfterEntry>>()
@@ -124,6 +125,19 @@ class Hooks private constructor(val env: AndroidEnv, private val parent: Hooks?)
     }
 
     /**
+     * Run [handler] after every call matching [pattern] that returned normally. This is jadx-emu's own return-value
+     * hook; [after] is the variant that came before it, and the two can be used together.
+     *
+     * [MethodCall.result] is the value the call returned, and [MethodCall.replace] changes it. Unlike [after], it also
+     * runs when a [hook] replaced the call, seeing the replacement, and for the construction of host objects (where
+     * the result is null). Calls that threw are not seen. Handlers registered for the exact signature run before
+     * name-only ones, newest first within each group, and the first to call replace ends the chain. A handler that
+     * throws is reported as [Diagnostic.Kind.HANDLER_FAILED] and the result becomes [UnknownVal]. When a call has both
+     * kinds, [after] handlers run first and these see their result.
+     */
+    fun hookAfter(pattern: String, handler: MethodHandler): Registration = add(root.hookAfters, pattern, handler, null)
+
+    /**
      * Implement a framework or host method matching [pattern].
      */
     fun stub(pattern: String, handler: MethodHandler): Registration = add(root.stubs, pattern, handler, null)
@@ -143,7 +157,7 @@ class Hooks private constructor(val env: AndroidEnv, private val parent: Hooks?)
      */
     fun clear() {
         val mine: (Entry) -> Boolean = if (parent == null) { e -> !e.builtin } else { e -> e.owner === this }
-        for (map in listOf(root.hooks, root.stubs, root.fields)) for (list in map.values) list.removeIf(mine)
+        for (map in listOf(root.hooks, root.hookAfters, root.stubs, root.fields)) for (list in map.values) list.removeIf(mine)
         val mineAfter: (AfterEntry) -> Boolean = if (parent == null) { _ -> true } else { e -> e.owner === this }
         for (list in root.afters.values) list.removeIf(mineAfter)
     }
@@ -161,6 +175,17 @@ class Hooks private constructor(val env: AndroidEnv, private val parent: Hooks?)
             if (call.replaced) break
         }
         return call
+    }
+
+    internal fun runHookAfters(vm: Vm, ref: MethodRef, receiver: Any?, args: MutableList<Any?>, result: Any?): Any? {
+        if (root.hookAfters.isEmpty()) return result
+        val entries = root.matching(root.hookAfters, ref) ?: return result
+        val call = MethodCall(vm, ref, receiver, args, result)
+        for (e in entries) {
+            if (!run(e, call)) call.replace(UnknownVal(ref.returnType))
+            if (call.replaced) break
+        }
+        return call.result
     }
 
     internal fun runAfters(vm: Vm, ref: MethodRef, receiver: Any?, args: MutableList<Any?>, result: Any?): Any? {

@@ -11,6 +11,8 @@ import java.io.File
  */
 object FrameworkStubs {
 
+    private val LOG = org.slf4j.LoggerFactory.getLogger(FrameworkStubs::class.java)
+
     /**
      * Signature-only source for the framework, or null if the stub jar could not be loaded.
      */
@@ -35,5 +37,7 @@ object FrameworkStubs {
         } finally {
             tmp.delete()
         }
+    }.onFailure {
+        LOG.warn("jadx-emu: framework stub jar failed to load, framework classes have no signatures: {}", it.toString())
     }.getOrNull()
 }

@@ -14,6 +14,7 @@ import jadx.plugins.emu.exec.runtime.DvmObject
 import jadx.plugins.emu.exec.runtime.DvmThrowable
 import jadx.plugins.emu.exec.runtime.UninitHost
 import jadx.plugins.emu.exec.runtime.UnknownVal
+import jadx.plugins.emu.exec.runtime.defaultValueOf
 import jadx.api.plugins.input.insns.Opcode
 
 private sealed interface Step
@@ -509,18 +510,22 @@ class Interpreter(private val vm: Vm) {
         val (recv, args) = gatherArgs(insn, frame, ref, hasReceiver)
         val hooked = try { vm.hooks.runHooks(vm, ref, recv, args) } catch (t: DvmThrowable) { return routeThrow(method, insn.offset, t, frame) }
         if (hooked != null && hooked.replaced) {
-            frame.result = retype(hooked.result, ref.returnType); frame.resultType = ref.returnType
+            val replaced = retype(hooked.result, ref.returnType)
+            frame.result = try { hookAfters(ref, recv, args, replaced) } catch (t: DvmThrowable) { return routeThrow(method, insn.offset, t, frame) }
+            frame.resultType = ref.returnType
             return Next(pc + 1)
         }
         val reflected = try { tryReflect(ref, recv, args) } catch (t: DvmThrowable) { return routeThrow(method, insn.offset, t, frame) }
         reflected?.let { (res, rt) ->
-            val out = try { afterHooks(ref, recv, args, res) } catch (t: DvmThrowable) { return routeThrow(method, insn.offset, t, frame) }
+            val out = try { bothAfters(ref, recv, args, res) } catch (t: DvmThrowable) { return routeThrow(method, insn.offset, t, frame) }
             frame.result = out
             frame.resultType = if (out === res) rt else ref.returnType   // a rewritten value no longer has the reflected type
             return Next(pc + 1)
         }
         if (ref.name == "<init>" && recv is UninitHost) {
             frame.replace(recv, vm.hostExec.construct(recv.type, ref, args))
+            val seen = try { hookAfters(ref, recv, args, null) } catch (t: DvmThrowable) { return routeThrow(method, insn.offset, t, frame) }
+            if (seen != null) { frame.result = seen; frame.resultType = ref.returnType }
             return Next(pc + 1)
         }
         val target = when {
@@ -533,7 +538,7 @@ class Interpreter(private val vm: Vm) {
             val sig = "(${ref.argTypes.joinToString("")})${ref.returnType}"
             val nr = vm.nativeBridge.call(ref.declClass.removePrefix("L").removeSuffix(";"), ref.name, sig, args, recv)
             if (nr !== NotHandled) {
-                frame.result = try { afterHooks(ref, recv, args, nr) } catch (t: DvmThrowable) { return routeThrow(method, insn.offset, t, frame) }
+                frame.result = try { bothAfters(ref, recv, args, nr) } catch (t: DvmThrowable) { return routeThrow(method, insn.offset, t, frame) }
                 frame.resultType = ref.returnType; return Next(pc + 1)
             }
         }
@@ -549,7 +554,7 @@ class Interpreter(private val vm: Vm) {
             vm.diagnose(Diagnostic.Kind.MISSING_STUB, ref, "no stub")
             UnknownVal(ref.returnType)
         }
-        frame.result = try { afterHooks(ref, recv, args, result) } catch (t: DvmThrowable) { return routeThrow(method, insn.offset, t, frame) }
+        frame.result = try { bothAfters(ref, recv, args, result) } catch (t: DvmThrowable) { return routeThrow(method, insn.offset, t, frame) }
         frame.resultType = ref.returnType
         return Next(pc + 1)
     }
@@ -561,6 +566,20 @@ class Interpreter(private val vm: Vm) {
         val r = vm.hooks.runAfters(vm, ref, recv, args, result)
         return if (r === result) r else retype(r, ref.returnType)
     }
+
+    /**
+     * Let `Hooks.hookAfter` handlers observe or rewrite [result]; a rewritten value is coerced to the declared return type.
+     */
+    private fun hookAfters(ref: MethodRef, recv: Any?, args: MutableList<Any?>, result: Any?): Any? {
+        val r = vm.hooks.runHookAfters(vm, ref, recv, args, result)
+        return if (r === result) r else retype(r, ref.returnType)
+    }
+
+    /**
+     * Both kinds of after handler for a call that completed normally: `after` first, then `hookAfter` on its result.
+     */
+    private fun bothAfters(ref: MethodRef, recv: Any?, args: MutableList<Any?>, result: Any?): Any? =
+        hookAfters(ref, recv, args, afterHooks(ref, recv, args, result))
 
     /**
      * Find the implementation of [shortId] starting at class [startType] and walking up the superclass chain.
@@ -1218,10 +1237,7 @@ class Interpreter(private val vm: Vm) {
     private fun cf(v: Any?): Float = when (v) { is Float -> v; is Double -> v.toFloat(); is Int -> Float.fromBits(v); is Long -> v.toFloat(); else -> ci(v).toFloat() }
     private fun cd(v: Any?): Double = when (v) { is Double -> v; is Float -> v.toDouble(); is Long -> Double.fromBits(v); else -> ci(v).toDouble() }
 
-    private fun defaultValue(type: String): Any? = when (type) {
-        "I", "B", "S", "C" -> 0; "J" -> 0L; "F" -> 0f; "D" -> 0.0; "Z" -> false
-        else -> null
-    }
+    private fun defaultValue(type: String): Any? = defaultValueOf(type)
 
     private fun fieldSet(frame: Frame, dest: Int, raw: Any?, t: String) {
         val v = retype(raw, t)

@@ -6,4 +6,4 @@ Original work is copyright its respective authors. Modifications in this fork ar
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License version 2, as published by the Free Software Foundation. It is distributed without any warranty, not even the implied warranty of merchantability or fitness for a particular purpose. See the LICENSE file for the full license text.
 
-Changes from upstream include the Hooks.after return-value hook. This line is developed independently from version 0.2.0 under the Maven coordinate io.github.flyphantomfly:jadx-emu, and picks up upstream fixes as they apply.
+Changes from upstream include the Hooks.after return-value hook, and parts of upstream's later beta.7 carried over: LayeredSource, hookAfter, the Vm field access methods, loadDex and fork. This line is developed independently from version 0.2.0 under the Maven coordinate io.github.flyphantomfly:jadx-emu, and picks up upstream fixes as they apply.
